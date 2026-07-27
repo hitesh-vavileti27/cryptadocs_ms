@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: supersecretpassword
+      POSTGRES_DB: cryptadocs
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./database/init-schema.sql:/docker-entrypoint-initdb.d/init.sql

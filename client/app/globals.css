@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-terminal-dark: #050505;
+  --color-terminal-green: #00ff41;
+  --color-terminal-dim: #008f11;
+  --color-terminal-border: #003b00;
+}
+
+body {
+  background-color: #050505;
+  color: #00ff41;
+  font-family: 'Courier New', Courier, monospace;
+  background-image: 
+    linear-gradient(to right, rgba(0, 255, 65, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 255, 65, 0.04) 1px, transparent 1px);
+  background-size: 30px 30px;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Chrome autofill background fix */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #00ff41 !important;
+  -webkit-box-shadow: 0 0 0px 1000px #0a0a0a inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #005511;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00ff41;
+}

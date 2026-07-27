@@ -1,0 +1,28 @@
+CREATE TABLE IF NOT EXISTS "User" (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username VARCHAR(255) UNIQUE NOT NULL,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  phone VARCHAR(50),
+  dob VARCHAR(50),
+  password VARCHAR(255) NOT NULL,
+  "avatarUrl" TEXT,
+  "createdAt" TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS "Vault" (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  pin VARCHAR(50) NOT NULL,
+  "userId" UUID REFERENCES "User"(id) ON DELETE CASCADE,
+  "createdAt" TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS "Document" (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(255) NOT NULL,
+  size VARCHAR(50),
+  hash VARCHAR(255),
+  content TEXT,
+  "vaultId" UUID REFERENCES "Vault"(id) ON DELETE CASCADE,
+  "createdAt" TIMESTAMP DEFAULT NOW()
+);
