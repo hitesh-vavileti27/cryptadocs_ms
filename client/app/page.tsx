@@ -1,16 +1,27 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Lock, Unlock, ShieldAlert, Terminal, FileText, Database, 
   Upload, LogOut, Home, HelpCircle, Mail, X, Info, User, Plus, 
   FolderPlus, FolderOpen, Eye, MoreVertical, Trash2, AlertTriangle,
-  Bell, Camera, UserPlus, RefreshCw, Calendar, Phone, CheckCircle2
+  Bell, Camera, UserPlus, RefreshCw, Calendar, Phone, CheckCircle2,
+  Sun, Moon
 } from "lucide-react";
+
+import { 
+  signUpUser, 
+  signInUser, 
+  getVaults, 
+  createVault as createVaultAction, 
+  deleteVault as deleteVaultAction, 
+  createDocument as createDocumentAction 
+} from "./action";
 
 type AuthState = "LOGIN" | "MFA" | "AUTHENTICATED";
 type NavTab = "VAULTS" | "NOTIFICATIONS" | "LOGS";
+type ThemeMode = "dark" | "light";
 
 interface UserProfile {
   username: string;
@@ -56,18 +67,116 @@ interface NotificationItem {
   read: boolean;
 }
 
+/* Dynamic Background Visual Animations & Effects */
+const AnimatedBackground = ({ isDark }: { isDark: boolean }) => {
+  return (
+    <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+      <motion.div
+        animate={{
+          x: [0, 40, -30, 0],
+          y: [0, -50, 30, 0],
+          scale: [1, 1.25, 0.9, 1],
+        }}
+        transition={{
+          duration: 18,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+        className={`absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full blur-[120px] opacity-40 ${
+          isDark ? "bg-blue-600" : "bg-blue-400"
+        }`}
+      />
+
+      <motion.div
+        animate={{
+          x: [0, -50, 40, 0],
+          y: [0, 40, -40, 0],
+          scale: [1, 0.85, 1.15, 1],
+        }}
+        transition={{
+          duration: 22,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+        className={`absolute -bottom-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] opacity-30 ${
+          isDark ? "bg-indigo-600" : "bg-sky-300"
+        }`}
+      />
+
+      <motion.div
+        animate={{
+          scale: [1, 1.2, 1],
+          opacity: isDark ? [0.15, 0.35, 0.15] : [0.2, 0.4, 0.2],
+        }}
+        transition={{
+          duration: 12,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+        className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full blur-[140px] ${
+          isDark ? "bg-cyan-500/20" : "bg-blue-200/50"
+        }`}
+      />
+
+      <div 
+        className={`absolute inset-0 opacity-[0.06] ${isDark ? "invert-0" : "invert"}`}
+        style={{
+          backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.8) 1px, transparent 0)`,
+          backgroundSize: '28px 28px'
+        }}
+      />
+
+      {[...Array(8)].map((_, i) => (
+        <motion.div
+          key={i}
+          className={`absolute rounded-full ${
+            isDark ? "bg-blue-400/50 shadow-[0_0_8px_rgba(96,165,250,0.8)]" : "bg-blue-600/40"
+          }`}
+          style={{
+            width: `${(i % 3) + 2}px`,
+            height: `${(i % 3) + 2}px`,
+            top: `${12 + i * 11}%`,
+            left: `${8 + (i * 13) % 84}%`,
+          }}
+          animate={{
+            y: [0, -40, 0],
+            x: [0, (i % 2 === 0 ? 15 : -15), 0],
+            opacity: [0.2, 0.85, 0.2],
+          }}
+          transition={{
+            duration: 5 + i * 1.5,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: i * 0.4,
+          }}
+        />
+      ))}
+    </div>
+  );
+};
+
 export default function CryptaDocsApp() {
-  // Core System States
+  const [theme, setTheme] = useState<ThemeMode>("dark");
+  const isDark = theme === "dark";
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
   const [authState, setAuthState] = useState<AuthState>("LOGIN");
   const [activeTab, setActiveTab] = useState<NavTab>("VAULTS");
   const [isRegistering, setIsRegistering] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  // File & Avatar Refs
+  // MongoDB & Auth status states
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [userId, setUserId] = useState<string>("");
+
   const modalFileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Profile State
   const [user, setUser] = useState<UserProfile>({
     username: "Agent_Cyber",
     email: "agent@cryptadocs.local",
@@ -77,61 +186,47 @@ export default function CryptaDocsApp() {
     avatarUrl: "",
   });
 
-  // Sign In Form State
   const [loginIdentifier, setLoginIdentifier] = useState("agent@cryptadocs.local");
   const [loginPassword, setLoginPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
 
-  // Sign Up Form State
   const [regUsername, setRegUsername] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPhone, setRegPhone] = useState("");
   const [regDob, setRegDob] = useState("");
   const [regPassword, setRegPassword] = useState("");
 
-  // Dropdown & Deletion States
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [vaultToDelete, setVaultToDelete] = useState<VaultItem | null>(null);
   const [deletePinInput, setDeletePinInput] = useState("");
   const [showIncorrectPinModal, setShowIncorrectPinModal] = useState(false);
 
-  // Modals
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [showCreateVaultModal, setShowCreateVaultModal] = useState(false);
   const [openVaultModal, setOpenVaultModal] = useState<VaultItem | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
-  // Vaults State
-  const [vaults, setVaults] = useState<VaultItem[]>([
-    { id: "V-1", name: "Standard Vault", pin: "1234", isUnlocked: false },
-    { id: "V-2", name: "High-Grade Vault", pin: "7788", isUnlocked: false },
-    { id: "V-3", name: "Quantum Vault", pin: "0000", isUnlocked: false },
-  ]);
-
-  // Create Vault Form Inputs
+  const [vaults, setVaults] = useState<VaultItem[]>([]);
   const [newVaultName, setNewVaultName] = useState("");
   const [newVaultPin, setNewVaultPin] = useState("");
-
-  // PIN Inputs for unlocking
   const [pinInputs, setPinInputs] = useState<{ [vaultId: string]: string }>({});
 
-  // Document Inspection States
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
 
-  // Modal Upload Form State
   const [modalUploadTitle, setModalUploadTitle] = useState("");
   const [modalUploadContent, setModalUploadContent] = useState("");
   const [modalDragActive, setModalDragActive] = useState(false);
   const [modalIsUploading, setModalIsUploading] = useState(false);
 
-  // Notifications Feed
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
+  const [notifications] = useState<NotificationItem[]>([
     {
       id: "N-101",
       title: "Zero-Knowledge Encryption v2.0 Active",
       timestamp: "2026-07-27 10:30",
       category: "SECURITY",
-      message: "All stored files and vault payload transfers are now isolated with enhanced local key derivation.",
+      message: "All stored files and vault payload transfers are isolated with enhanced local key derivation.",
       read: false
     },
     {
@@ -139,48 +234,25 @@ export default function CryptaDocsApp() {
       title: "System Maintenance Completed",
       timestamp: "2026-07-25 14:15",
       category: "UPDATE",
-      message: "Database indexing and local memory buffers have been optimized for faster document loading.",
-      read: true
-    },
-    {
-      id: "N-103",
-      title: "MFA Authentication Policy Updated",
-      timestamp: "2026-07-20 09:00",
-      category: "SYSTEM",
-      message: "Two-factor authorization is mandatory across all active sessions to secure vault access.",
+      message: "Database indexing and local memory buffers optimized for faster document loading.",
       read: true
     }
   ]);
 
-  // Documents Database
-  const [documents, setDocuments] = useState<DocumentItem[]>([
-    {
-      id: "DOC-101",
-      title: "Tech Travels_ 10 Years of Change.txt",
-      vaultName: "Standard Vault",
-      size: "0.9 MB",
-      hash: "0x8f2a9110...",
-      createdAt: "2026-07-27 11:56",
-      content: "Over the past decade, technology has transformed every aspect of software engineering, cloud architecture, and data privacy...",
-      encrypted: true,
-    },
-    {
-      id: "DOC-102",
-      title: "User_Guide_Protocol.md",
-      vaultName: "Standard Vault",
-      size: "128 KB",
-      hash: "0x3b11e400...",
-      createdAt: "2026-07-25 09:12",
-      content: "Welcome to CryptaDocs. Uploaded files are safely isolated within designated encrypted vaults.",
-      encrypted: false,
-    }
-  ]);
-
-  // Activity Logs State
   const [logs, setLogs] = useState<LogEntry[]>([
     { id: "1", timestamp: new Date().toLocaleTimeString(), user: user.username, type: "SYS", msg: "CryptaDocs Workspace Ready." },
-    { id: "2", timestamp: new Date().toLocaleTimeString(), user: user.username, type: "AUTH", msg: "Authenticated user session active." }
+    { id: "2", timestamp: new Date().toLocaleTimeString(), user: user.username, type: "AUTH", msg: "Session initialized." }
   ]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const addLog = (type: LogEntry["type"], msg: string) => {
     setLogs((prev) => [
@@ -189,7 +261,45 @@ export default function CryptaDocsApp() {
     ].slice(0, 100));
   };
 
-  // Avatar Upload Handler
+  const refreshVaultsFromDb = async (uId: string) => {
+    if (!uId) return;
+    try {
+      const dbVaults = await getVaults(uId);
+      if (dbVaults && Array.isArray(dbVaults)) {
+        const mappedVaults: VaultItem[] = dbVaults.map((v: any) => ({
+          id: v.id,
+          name: v.name,
+          pin: v.pinHash || "1234",
+          isUnlocked: vaults.find((prev) => prev.id === v.id)?.isUnlocked || false,
+        }));
+        
+        const allDocs: DocumentItem[] = [];
+        dbVaults.forEach((v: any) => {
+          if (v.documents && Array.isArray(v.documents)) {
+            v.documents.forEach((d: any) => {
+              allDocs.push({
+                id: d.id,
+                title: d.title,
+                vaultName: v.name,
+                size: d.fileSize || "1 KB",
+                hash: d.contentHash || "0x8f2a...",
+                createdAt: d.createdAt ? d.createdAt.substring(0, 16).replace("T", " ") : new Date().toISOString().substring(0, 16).replace("T", " "),
+                content: d.encryptedContent || "",
+                encrypted: true,
+              });
+            });
+          }
+        });
+
+        setVaults(mappedVaults);
+        setDocuments(allDocs);
+        addLog("VAULT", `Synchronized ${mappedVaults.length} vaults from database.`);
+      }
+    } catch (err) {
+      console.error("Error loading vaults from MongoDB:", err);
+    }
+  };
+
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -204,37 +314,78 @@ export default function CryptaDocsApp() {
     }
   };
 
-  // Auth Handlers
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
+    setAuthLoading(true);
     addLog("AUTH", `Login requested for: ${loginIdentifier}`);
-    setAuthState("MFA");
+
+    try {
+      const res = await signInUser(loginIdentifier, loginPassword);
+      if (res.success && res.user) {
+        setUserId(res.user.id);
+        setUser((prev) => ({
+          ...prev,
+          email: res.user.email,
+          username: res.user.username || res.user.email.split("@")[0],
+        }));
+        addLog("AUTH", `Credentials verified in database for: ${res.user.email}`);
+        setAuthState("MFA");
+      } else {
+        setAuthError(res.error || "Invalid email or password.");
+        addLog("AUTH", `Login failed: ${res.error}`);
+      }
+    } catch (err) {
+      setAuthError("An unexpected error occurred during sign in.");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const handleSignupSubmit = (e: React.FormEvent) => {
+  const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const today = new Date().toISOString().split("T")[0];
-    const newUser: UserProfile = {
-      username: regUsername || "NewAgent",
-      email: regEmail,
-      phone: regPhone,
-      dob: regDob,
-      createdAt: today,
-      avatarUrl: user.avatarUrl,
-    };
-    setUser(newUser);
-    addLog("AUTH", `Account created for: ${regEmail}`);
-    setIsRegistering(false);
-    setLoginIdentifier(regEmail);
-    setRegPassword("");
+    setAuthError(null);
+    setAuthLoading(true);
+    addLog("AUTH", `Registration requested for: ${regEmail}`);
+
+    try {
+      const res = await signUpUser(regEmail, regPassword, regUsername, regPhone, regDob);
+      if (res.success && res.user) {
+        const today = new Date().toISOString().split("T")[0];
+        const newUser: UserProfile = {
+          username: regUsername || regEmail.split("@")[0],
+          email: regEmail,
+          phone: regPhone,
+          dob: regDob,
+          createdAt: today,
+          avatarUrl: user.avatarUrl,
+        };
+        setUser(newUser);
+        setUserId(res.user.id);
+        addLog("AUTH", `Account created in database for: ${regEmail}`);
+        setIsRegistering(false);
+        setLoginIdentifier(regEmail);
+        setRegPassword("");
+      } else {
+        setAuthError(res.error || "Failed to register account.");
+        addLog("AUTH", `Signup failed: ${res.error}`);
+      }
+    } catch (err) {
+      setAuthError("An unexpected error occurred during registration.");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const handleMfaSubmit = (e: React.FormEvent) => {
+  const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mfaCode.length === 6) {
       setVaults((prev) => prev.map((v) => ({ ...v, isUnlocked: false })));
-      addLog("AUTH", `User [${user.username}] successfully verified MFA.`);
+      addLog("AUTH", `User [${user.username}] verified MFA.`);
       setAuthState("AUTHENTICATED");
+      if (userId) {
+        await refreshVaultsFromDb(userId);
+      }
     }
   };
 
@@ -243,11 +394,13 @@ export default function CryptaDocsApp() {
     setAuthState("LOGIN");
     setActiveTab("VAULTS");
     setIsProfileOpen(false);
-    setVaults((prev) => prev.map((v) => ({ ...v, isUnlocked: false })));
+    setVaults([]);
+    setDocuments([]);
     setOpenVaultModal(null);
     setActiveDoc(null);
     setLoginPassword("");
     setMfaCode("");
+    setUserId("");
   };
 
   const formatPreviewContent = (text: string) => {
@@ -258,26 +411,42 @@ export default function CryptaDocsApp() {
     return text;
   };
 
-  // Create Vault
-  const handleCreateVaultSubmit = (e: React.FormEvent) => {
+  const isImageDoc = (doc: DocumentItem) => {
+    return (
+      doc.content.startsWith("data:image/") ||
+      doc.content.startsWith("blob:") ||
+      /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(doc.title)
+    );
+  };
+
+  const isPdfDoc = (doc: DocumentItem) => {
+    return (
+      doc.content.startsWith("data:application/pdf") ||
+      doc.title.toLowerCase().endsWith(".pdf")
+    );
+  };
+
+  const handleCreateVaultSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newVaultName || !newVaultPin) return;
+    if (!newVaultName || !newVaultPin || !userId) return;
 
-    const newVault: VaultItem = {
-      id: `V-${vaults.length + 1}`,
-      name: newVaultName,
-      pin: newVaultPin,
-      isUnlocked: false,
-    };
+    try {
+      const res = await createVaultAction(userId, newVaultName, newVaultPin, "salt_123");
+      if (res.success && res.vault) {
+        addLog("VAULT", `Created vault "${newVaultName}" in database.`);
+        await refreshVaultsFromDb(userId);
+      } else {
+        addLog("VAULT", `Vault creation failed: ${res.error}`);
+      }
+    } catch (err) {
+      console.error("Create Vault error:", err);
+    }
 
-    setVaults((prev) => [...prev, newVault]);
-    addLog("VAULT", `Created vault "${newVaultName}".`);
     setNewVaultName("");
     setNewVaultPin("");
     setShowCreateVaultModal(false);
   };
 
-  // Unlock Vault & Open Popup
   const unlockVault = (vaultId: string) => {
     const targetVault = vaults.find((v) => v.id === vaultId);
     if (!targetVault) return;
@@ -294,15 +463,20 @@ export default function CryptaDocsApp() {
     }
   };
 
-  // Confirm Delete Vault
-  const handleConfirmDeleteVault = (e: React.FormEvent) => {
+  const handleConfirmDeleteVault = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vaultToDelete) return;
 
     if (deletePinInput === vaultToDelete.pin) {
-      setVaults((prev) => prev.filter((v) => v.id !== vaultToDelete.id));
-      setDocuments((prev) => prev.filter((d) => d.vaultName !== vaultToDelete.name));
-      addLog("VAULT", `Deleted vault "${vaultToDelete.name}" and associated files.`);
+      try {
+        const res = await deleteVaultAction(vaultToDelete.id);
+        if (res.success) {
+          addLog("VAULT", `Deleted vault "${vaultToDelete.name}" from database.`);
+          if (userId) await refreshVaultsFromDb(userId);
+        }
+      } catch (err) {
+        console.error("Delete vault error:", err);
+      }
 
       setVaultToDelete(null);
       setDeletePinInput("");
@@ -316,21 +490,30 @@ export default function CryptaDocsApp() {
     }
   };
 
-  // Lock Vault
+  const handleDeleteFile = (fileId: string, fileName: string) => {
+    setDocuments((prev) => prev.filter((doc) => doc.id !== fileId));
+    addLog("VAULT", `Deleted file '${fileName}' from local workspace.`);
+    if (activeDoc?.id === fileId) {
+      setActiveDoc(null);
+    }
+  };
+
   const lockVault = (vaultId: string) => {
     setVaults((prev) => prev.map((v) => (v.id === vaultId ? { ...v, isUnlocked: false } : v)));
     if (openVaultModal?.id === vaultId) {
       setOpenVaultModal(null);
       setActiveDoc(null);
+      setShowUploadModal(false);
     }
   };
 
-  // Process Real Selected or Dropped File
   const processUploadedFile = (file: File) => {
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isImage = file.type.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(file.name);
+    
     const reader = new FileReader();
 
-    if (isPdf) {
+    if (isPdf || isImage) {
       reader.onload = (e) => {
         const dataUrl = (e.target?.result as string) || "";
         setModalUploadTitle(file.name);
@@ -347,37 +530,44 @@ export default function CryptaDocsApp() {
     }
   };
 
-  // Modal Upload Form Handler
-  const handleModalUploadSubmit = (e: React.FormEvent) => {
+  const handleModalUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!modalUploadTitle || !openVaultModal) return;
+    if (!modalUploadTitle || !openVaultModal || !userId) return;
 
     setModalIsUploading(true);
     addLog("ENCRYPT", `Saving '${modalUploadTitle}' to ${openVaultModal.name}...`);
 
-    setTimeout(() => {
-      const sizeBytes = modalUploadContent.length;
-      const formattedSize = sizeBytes > 1024 * 1024 
-        ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB` 
-        : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+    const sizeBytes = modalUploadContent.length;
+    const formattedSize = sizeBytes > 1024 * 1024 
+      ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB` 
+      : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
 
-      const newDoc: DocumentItem = {
-        id: `DOC-${Math.floor(100 + Math.random() * 900)}`,
+    const contentHash = `0x${Math.random().toString(16).substring(2, 10)}`;
+
+    try {
+      const res = await createDocumentAction({
+        vaultId: openVaultModal.id,
         title: modalUploadTitle,
-        vaultName: openVaultModal.name,
-        size: formattedSize,
-        hash: `0x${Math.random().toString(16).substring(2, 10)}...`,
-        createdAt: new Date().toISOString().replace("T", " ").substring(0, 16),
-        content: modalUploadContent || "Standard encrypted file content.",
-        encrypted: true,
-      };
+        encryptedContent: modalUploadContent || "Standard encrypted file content.",
+        contentHash,
+        fileSize: formattedSize,
+        iv: "iv_" + Math.random().toString(36).substring(2, 8),
+      });
 
-      setDocuments((prev) => [newDoc, ...prev]);
+      if (res.success) {
+        addLog("VAULT", `File '${modalUploadTitle}' saved in ${openVaultModal.name}.`);
+        await refreshVaultsFromDb(userId);
+      } else {
+        console.error("Document creation error:", res.error);
+      }
+    } catch (err) {
+      console.error("Document upload error:", err);
+    } finally {
       setModalIsUploading(false);
       setModalUploadTitle("");
       setModalUploadContent("");
-      addLog("VAULT", `File '${newDoc.title}' saved in ${openVaultModal.name}.`);
-    }, 400);
+      setShowUploadModal(false);
+    }
   };
 
   const triggerInspect = (doc: DocumentItem) => {
@@ -385,10 +575,22 @@ export default function CryptaDocsApp() {
     addLog("VAULT", `Opened '${doc.title}' for viewing.`);
   };
 
+  const themeStyles = {
+    bg: isDark ? "bg-[#0a1128] text-white" : "bg-[#f0f4f8] text-[#0a1128]",
+    header: isDark ? "bg-[#060c1a]/90 border-white/10" : "bg-white/95 border-blue-900/10 shadow-sm",
+    cardBg: isDark ? "bg-[#111d4a]/90 backdrop-blur-md border-blue-500/30" : "bg-white/90 backdrop-blur-md border-blue-900/15 shadow-sm",
+    inputBg: isDark ? "bg-[#060c1a] border-white/20 text-white focus:border-blue-400" : "bg-slate-50 border-slate-300 text-[#0a1128] focus:border-blue-600",
+    buttonPrimary: isDark ? "bg-blue-600 hover:bg-blue-500 text-white border-blue-400 shadow-lg shadow-blue-600/20" : "bg-[#0a1128] hover:bg-[#1a2b5c] text-white border-[#0a1128]",
+    buttonSecondary: isDark ? "bg-white/10 hover:bg-white/20 text-white border-white/30" : "bg-blue-50 hover:bg-blue-100 text-[#0a1128] border-blue-200",
+    mutedText: isDark ? "text-blue-200/70" : "text-slate-600",
+    modalOverlay: isDark ? "bg-black/80 backdrop-blur-sm" : "bg-slate-900/50 backdrop-blur-sm",
+  };
+
   return (
-    <div className="min-h-screen bg-[#0b132b] text-[#00ff41] font-mono flex flex-col justify-between selection:bg-[#00ff41] selection:text-black">
+    <div className={`relative min-h-screen ${themeStyles.bg} font-mono flex flex-col justify-between transition-colors duration-300 selection:bg-blue-600 selection:text-white`}>
       
-      {/* Hidden Profile Picture Input */}
+      <AnimatedBackground isDark={isDark} />
+
       <input 
         type="file" 
         ref={avatarInputRef} 
@@ -397,206 +599,228 @@ export default function CryptaDocsApp() {
         onChange={handleAvatarChange} 
       />
 
-      {/* DROPDOWN OVERLAY DISMISSER */}
-      {(activeDropdown || isProfileOpen) && (
-        <div 
-          className="fixed inset-0 z-30" 
-          onClick={() => {
-            setActiveDropdown(null);
-            setIsProfileOpen(false);
-          }} 
-        />
-      )}
-
-      {/* 1. HEADER */}
-      <header className="fixed top-0 left-0 w-full z-40 bg-[#0c1938]/90 border-b border-[#00ff41]/30 backdrop-blur-md px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
+      {/* HEADER */}
+      <header className={`fixed top-0 left-0 w-full z-40 ${themeStyles.header} border-b backdrop-blur-md px-6 py-3 flex items-center justify-between transition-colors duration-300`}>
+        <div className="flex items-center gap-6 relative z-10">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab("VAULTS")}>
-            <ShieldAlert className="w-6 h-6 text-[#00ff41]" />
-            <h1 className="text-lg font-bold tracking-widest text-[#00ff41]">
-              CRYPTADOCS <span className="text-xs text-[#008f11]">v2.0</span>
+            <ShieldAlert className="w-6 h-6 text-blue-500" />
+            <h1 className="text-lg font-bold tracking-widest">
+              CRYPTADOCS <span className="text-xs text-blue-400">v2.0</span>
             </h1>
           </div>
 
-          <div className="flex items-center gap-3 border-l border-[#00ff41]/30 pl-4 text-xs">
-            <button onClick={() => setActiveTab("VAULTS")} className="flex items-center gap-1.5 text-[#008f11] hover:text-[#00ff41] transition-colors">
+          <div className="flex items-center gap-3 border-l border-blue-500/30 pl-4 text-xs">
+            <button onClick={() => setActiveTab("VAULTS")} className={`${themeStyles.mutedText} hover:text-blue-400 transition-colors flex items-center gap-1.5`}>
               <Home size={14} /> HOME
             </button>
-            <button onClick={() => setShowHelpModal(true)} className="flex items-center gap-1.5 text-[#008f11] hover:text-[#00ff41] transition-colors">
+            <button onClick={() => setShowHelpModal(true)} className={`${themeStyles.mutedText} hover:text-blue-400 transition-colors flex items-center gap-1.5`}>
               <HelpCircle size={14} /> HELP
             </button>
-            <button onClick={() => setShowContactModal(true)} className="flex items-center gap-1.5 text-[#008f11] hover:text-[#00ff41] transition-colors">
+            <button onClick={() => setShowContactModal(true)} className={`${themeStyles.mutedText} hover:text-blue-400 transition-colors flex items-center gap-1.5`}>
               <Mail size={14} /> CONTACT
             </button>
           </div>
         </div>
 
-        {/* TOP RIGHT USER PROFILE BUTTON & DROPDOWN */}
-        {authState === "AUTHENTICATED" ? (
-          <div className="relative z-40">
-            <button 
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="flex items-center gap-2.5 bg-[#070d1e] border border-[#00ff41]/50 hover:border-[#00ff41] px-3 py-1.5 rounded-full transition-all group"
-            >
-              <div className="relative w-8 h-8 rounded-full overflow-hidden border border-[#00ff41] bg-[#0b132b] flex items-center justify-center">
-                {user.avatarUrl ? (
-                  <img src={user.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <User size={18} className="text-[#00ff41]" />
-                )}
-              </div>
-              <span className="text-xs font-bold text-[#00ff41] group-hover:text-white transition-colors">
-                {user.username}
-              </span>
-            </button>
+        <div className="flex items-center gap-3 relative z-10">
+          <button
+            onClick={toggleTheme}
+            className={`p-2 rounded-full border transition-all flex items-center justify-center ${
+              isDark 
+                ? "bg-[#111d4a] border-white/20 text-yellow-300 hover:bg-blue-900/50" 
+                : "bg-slate-100 border-slate-300 text-[#0a1128] hover:bg-slate-200"
+            }`}
+            title={`Switch to ${isDark ? "Light" : "Dark"} Mode`}
+          >
+            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
 
-            {/* PROFILE DROPDOWN MENU */}
-            <AnimatePresence>
-              {isProfileOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute right-0 mt-3 w-80 bg-[#070d1e] border-2 border-[#00ff41] shadow-[0_10px_30px_rgba(0,255,65,0.2)] p-5 rounded z-50 text-xs"
-                >
-                  {/* CIRCULAR PROFILE PICTURE FRAME & USERNAME */}
-                  <div className="flex flex-col items-center border-b border-[#00ff41]/30 pb-4 mb-4">
-                    <div className="relative group">
-                      <div className="w-20 h-20 rounded-full border-2 border-[#00ff41] p-1 bg-[#0b132b] flex items-center justify-center overflow-hidden shadow-[0_0_15px_rgba(0,255,65,0.3)]">
-                        {user.avatarUrl ? (
-                          <img src={user.avatarUrl} alt="Avatar" className="w-full h-full rounded-full object-cover" />
-                        ) : (
-                          <User size={40} className="text-[#00ff41]" />
-                        )}
+          {authState === "AUTHENTICATED" ? (
+            <div className="relative" ref={profileDropdownRef}>
+              <button 
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                className={`flex items-center gap-2.5 border px-3 py-1.5 rounded-full transition-all group ${
+                  isDark ? "bg-[#060c1a] border-blue-400/50 hover:border-blue-300" : "bg-white border-blue-900/20 hover:border-blue-900"
+                }`}
+              >
+                <div className="relative w-8 h-8 rounded-full overflow-hidden border border-blue-400 bg-blue-950 flex items-center justify-center">
+                  {user.avatarUrl ? (
+                    <img src={user.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={18} className="text-blue-300" />
+                  )}
+                </div>
+                <span className="text-xs font-bold transition-colors">
+                  {user.username}
+                </span>
+              </button>
+
+              <AnimatePresence>
+                {isProfileOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className={`absolute right-0 mt-3 w-80 ${themeStyles.cardBg} border-2 shadow-2xl p-5 rounded z-50 text-xs`}
+                  >
+                    <div className="flex flex-col items-center border-b border-blue-500/20 pb-4 mb-4">
+                      <div className="relative group">
+                        <div className="w-20 h-20 rounded-full border-2 border-blue-400 p-1 bg-blue-950 flex items-center justify-center overflow-hidden shadow-md">
+                          {user.avatarUrl ? (
+                            <img src={user.avatarUrl} alt="Avatar" className="w-full h-full rounded-full object-cover" />
+                          ) : (
+                            <User size={40} className="text-blue-300" />
+                          )}
+                        </div>
+                        
+                        <button 
+                          onClick={() => avatarInputRef.current?.click()}
+                          className="absolute bottom-0 right-0 bg-blue-500 text-white p-1.5 rounded-full hover:bg-blue-400 transition-all shadow"
+                        >
+                          <Camera size={13} />
+                        </button>
                       </div>
-                      
-                      {/* Upload Picture Button */}
+
+                      <h3 className="text-sm font-bold mt-3 tracking-wider">{user.username}</h3>
+                      <span className={`text-[10px] ${themeStyles.mutedText}`}>VERIFIED CRYPTADOCS AGENT</span>
+                    </div>
+
+                    <div className={`space-y-2.5 text-[11px] mb-5 p-3 border rounded ${isDark ? "bg-[#060c1a] border-white/10" : "bg-slate-50 border-slate-200"}`}>
+                      <div className="flex items-center gap-2">
+                        <Mail size={13} className="text-blue-400" />
+                        <span className={`font-bold ${themeStyles.mutedText}`}>Email:</span>
+                        <span className="truncate">{user.email}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Phone size={13} className="text-blue-400" />
+                        <span className={`font-bold ${themeStyles.mutedText}`}>Phone:</span>
+                        <span>{user.phone || "N/A"}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Calendar size={13} className="text-blue-400" />
+                        <span className={`font-bold ${themeStyles.mutedText}`}>DOB:</span>
+                        <span>{user.dob || "N/A"}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 border-t border-blue-500/10 pt-2 mt-2">
+                        <CheckCircle2 size={13} className="text-blue-400" />
+                        <span className={`font-bold ${themeStyles.mutedText}`}>Created:</span>
+                        <span>{user.createdAt}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
                       <button 
-                        onClick={() => avatarInputRef.current?.click()}
-                        className="absolute bottom-0 right-0 bg-[#00ff41] text-black p-1.5 rounded-full hover:bg-white transition-all shadow"
-                        title="Upload Profile Picture"
+                        onClick={() => {
+                          setIsProfileOpen(false);
+                          setAuthState("LOGIN");
+                        }}
+                        className={`w-full flex items-center justify-center gap-2 border py-2 transition-all font-bold ${themeStyles.buttonSecondary}`}
                       >
-                        <Camera size={13} />
+                        <RefreshCw size={13} /> SWITCH ACCOUNT
+                      </button>
+
+                      <button 
+                        onClick={() => {
+                          setIsProfileOpen(false);
+                          setIsRegistering(true);
+                          setAuthState("LOGIN");
+                        }}
+                        className={`w-full flex items-center justify-center gap-2 border py-2 transition-all font-bold ${themeStyles.buttonSecondary}`}
+                      >
+                        <UserPlus size={13} /> ADD ACCOUNT
+                      </button>
+
+                      <button 
+                        onClick={handleLogout}
+                        className="w-full flex items-center justify-center gap-2 border border-red-500/40 hover:border-red-500 bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2 transition-all font-bold mt-2"
+                      >
+                        <LogOut size={13} /> LOG OUT
                       </button>
                     </div>
-
-                    {/* Username right below image */}
-                    <h3 className="text-sm font-bold text-[#00ff41] mt-3 tracking-wider">{user.username}</h3>
-                    <span className="text-[10px] text-[#008f11]">VERIFIED CRYPTADOCS AGENT</span>
-                  </div>
-
-                  {/* USER DETAILS GRID */}
-                  <div className="space-y-2.5 text-[11px] mb-5 bg-[#0b132b] p-3 border border-[#00ff41]/20 rounded">
-                    <div className="flex items-center gap-2 text-gray-300">
-                      <Mail size={13} className="text-[#00ff41]" />
-                      <span className="text-[#008f11] font-bold">Email:</span>
-                      <span className="text-[#00ff41] truncate">{user.email}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-gray-300">
-                      <Phone size={13} className="text-[#00ff41]" />
-                      <span className="text-[#008f11] font-bold">Phone:</span>
-                      <span className="text-[#00ff41]">{user.phone}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-gray-300">
-                      <Calendar size={13} className="text-[#00ff41]" />
-                      <span className="text-[#008f11] font-bold">DOB:</span>
-                      <span className="text-[#00ff41]">{user.dob}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-gray-300 border-t border-[#00ff41]/10 pt-2 mt-2">
-                      <CheckCircle2 size={13} className="text-[#00ff41]" />
-                      <span className="text-[#008f11] font-bold">Created:</span>
-                      <span className="text-[#00ff41]">{user.createdAt}</span>
-                    </div>
-                  </div>
-
-                  {/* ACCOUNT ACTIONS */}
-                  <div className="space-y-2">
-                    <button 
-                      onClick={() => {
-                        setIsProfileOpen(false);
-                        setAuthState("LOGIN");
-                      }}
-                      className="w-full flex items-center justify-center gap-2 border border-[#00ff41]/50 hover:border-[#00ff41] bg-[#00ff41]/10 hover:bg-[#00ff41]/20 text-[#00ff41] py-2 transition-all font-bold"
-                    >
-                      <RefreshCw size={13} /> SWITCH ACCOUNT
-                    </button>
-
-                    <button 
-                      onClick={() => {
-                        setIsProfileOpen(false);
-                        setIsRegistering(true);
-                        setAuthState("LOGIN");
-                      }}
-                      className="w-full flex items-center justify-center gap-2 border border-[#00ff41]/50 hover:border-[#00ff41] bg-[#00ff41]/10 hover:bg-[#00ff41]/20 text-[#00ff41] py-2 transition-all font-bold"
-                    >
-                      <UserPlus size={13} /> ADD ACCOUNT
-                    </button>
-
-                    <button 
-                      onClick={handleLogout}
-                      className="w-full flex items-center justify-center gap-2 border border-red-800 hover:border-red-500 bg-red-950/40 text-red-400 py-2 transition-all font-bold mt-2"
-                    >
-                      <LogOut size={13} /> LOG OUT
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        ) : (
-          <span className="text-xs text-[#008f11] border border-[#00ff41]/20 px-2 py-1 bg-[#070d1e]">
-            AUTHENTICATION REQUIRED
-          </span>
-        )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <span className={`text-xs border px-2.5 py-1 rounded ${isDark ? "border-white/20 bg-[#060c1a]" : "border-slate-300 bg-white"}`}>
+              AUTHENTICATION REQUIRED
+            </span>
+          )}
+        </div>
       </header>
 
-      {/* 2. LOGIN / SIGNUP / MFA */}
+      {/* AUTH SCREEN */}
       {authState !== "AUTHENTICATED" && (
-        <main className="flex-1 flex items-center justify-center p-4 mt-16">
+        <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 mt-16 mb-8">
+          <div className="text-center mb-8 space-y-2">
+            <div className="flex items-center justify-center gap-3">
+              <ShieldAlert className="w-10 h-10 md:w-12 md:h-12 text-blue-500" />
+              <h1 className="text-4xl md:text-6xl font-black tracking-widest">
+                CRYPTADOCS
+              </h1>
+            </div>
+            <p className={`text-xs md:text-sm font-semibold tracking-widest ${themeStyles.mutedText}`}>
+              ZERO-KNOWLEDGE ENCRYPTED DOCUMENT VAULT <span className="text-blue-500 font-bold">v2.0</span>
+            </p>
+          </div>
+
           <AnimatePresence mode="wait">
             {authState === "LOGIN" && !isRegistering && (
               <motion.div key="login" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} className="w-full max-w-md">
-                <form onSubmit={handleLoginSubmit} className="border border-[#00ff41]/40 bg-[#070d1e] p-8 shadow-[0_0_30px_rgba(0,255,65,0.08)]">
-                  <h2 className="text-sm font-bold mb-6 border-b border-[#00ff41]/20 pb-3 flex items-center gap-2 text-[#00ff41]">
-                    <Lock size={18} /> USER SIGN IN
+                <form onSubmit={handleLoginSubmit} className={`border ${themeStyles.cardBg} p-8 shadow-xl rounded`}>
+                  <h2 className="text-sm font-bold mb-6 border-b border-blue-500/20 pb-3 flex items-center gap-2">
+                    <Lock size={18} className="text-blue-500" /> USER SIGN IN
                   </h2>
+
+                  {authError && (
+                    <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-300 text-xs">
+                      {authError}
+                    </div>
+                  )}
                   
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs text-[#008f11] mb-1">USERNAME OR EMAIL</label>
+                      <label className={`block text-xs mb-1 ${themeStyles.mutedText}`}>USERNAME OR EMAIL</label>
                       <input 
                         type="text" 
                         value={loginIdentifier}
                         onChange={(e) => setLoginIdentifier(e.target.value)}
                         placeholder="agent@cryptadocs.local"
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2.5 text-xs text-[#00ff41] outline-none"
+                        className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
                         required 
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-[#008f11] mb-1">PASSWORD</label>
+                      <label className={`block text-xs mb-1 ${themeStyles.mutedText}`}>PASSWORD</label>
                       <input 
                         type="password" 
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
                         placeholder="••••••••••••"
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2.5 text-xs text-[#00ff41] outline-none"
+                        className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
                         required 
                       />
                     </div>
 
-                    <button type="submit" className="w-full mt-2 bg-[#00ff41]/10 hover:bg-[#00ff41]/20 text-[#00ff41] border border-[#00ff41] py-2.5 text-xs font-bold tracking-wider transition-all">
-                      SIGN IN
+                    <button 
+                      type="submit" 
+                      disabled={authLoading}
+                      className={`w-full mt-2 border py-2.5 text-xs font-bold tracking-wider transition-all rounded disabled:opacity-50 ${themeStyles.buttonPrimary}`}
+                    >
+                      {authLoading ? "AUTHENTICATING..." : "SIGN IN"}
                     </button>
                   </div>
 
                   <button 
                     type="button" 
-                    onClick={() => setIsRegistering(true)}
-                    className="w-full mt-5 text-[11px] text-[#008f11] hover:text-[#00ff41] transition-colors text-center"
+                    onClick={() => {
+                      setIsRegistering(true);
+                      setAuthError(null);
+                    }}
+                    className={`w-full mt-5 text-[11px] ${themeStyles.mutedText} hover:text-blue-500 transition-colors text-center block`}
                   >
                     [ Need an account? Create one here ]
                   </button>
@@ -606,80 +830,91 @@ export default function CryptaDocsApp() {
 
             {authState === "LOGIN" && isRegistering && (
               <motion.div key="signup" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} className="w-full max-w-md">
-                <form onSubmit={handleSignupSubmit} className="border border-[#00ff41]/40 bg-[#070d1e] p-8 shadow-[0_0_30px_rgba(0,255,65,0.08)]">
-                  <h2 className="text-sm font-bold mb-6 border-b border-[#00ff41]/20 pb-3 flex items-center gap-2 text-[#00ff41]">
-                    <UserPlus size={18} /> CREATE AN ACCOUNT
+                <form onSubmit={handleSignupSubmit} className={`border ${themeStyles.cardBg} p-8 shadow-xl rounded`}>
+                  <h2 className="text-sm font-bold mb-6 border-b border-blue-500/20 pb-3 flex items-center gap-2">
+                    <UserPlus size={18} className="text-blue-500" /> CREATE AN ACCOUNT
                   </h2>
+
+                  {authError && (
+                    <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-300 text-xs">
+                      {authError}
+                    </div>
+                  )}
                   
                   <div className="space-y-3.5">
                     <div>
-                      <label className="block text-[11px] text-[#008f11] mb-1">USERNAME</label>
+                      <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>USERNAME</label>
                       <input 
                         type="text" 
                         value={regUsername}
                         onChange={(e) => setRegUsername(e.target.value)}
                         placeholder="Agent_Cyber"
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2 text-xs text-[#00ff41] outline-none"
+                        className={`w-full p-2 text-xs outline-none rounded ${themeStyles.inputBg}`}
                         required 
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] text-[#008f11] mb-1">EMAIL ADDRESS</label>
+                      <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>EMAIL ADDRESS</label>
                       <input 
                         type="email" 
                         value={regEmail}
                         onChange={(e) => setRegEmail(e.target.value)}
                         placeholder="agent@cryptadocs.local"
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2 text-xs text-[#00ff41] outline-none"
+                        className={`w-full p-2 text-xs outline-none rounded ${themeStyles.inputBg}`}
                         required 
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] text-[#008f11] mb-1">MOBILE NUMBER</label>
+                      <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>MOBILE NUMBER</label>
                       <input 
                         type="tel" 
                         value={regPhone}
                         onChange={(e) => setRegPhone(e.target.value)}
                         placeholder="+1 (555) 019-2831"
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2 text-xs text-[#00ff41] outline-none"
-                        required 
+                        className={`w-full p-2 text-xs outline-none rounded ${themeStyles.inputBg}`}
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] text-[#008f11] mb-1">DATE OF BIRTH</label>
+                      <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>DATE OF BIRTH</label>
                       <input 
                         type="date" 
                         value={regDob}
                         onChange={(e) => setRegDob(e.target.value)}
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2 text-xs text-[#00ff41] outline-none"
-                        required 
+                        className={`w-full p-2 text-xs outline-none rounded ${themeStyles.inputBg}`}
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] text-[#008f11] mb-1">PASSWORD</label>
+                      <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>PASSWORD</label>
                       <input 
                         type="password" 
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
                         placeholder="••••••••••••"
-                        className="w-full bg-[#0b132b] border border-[#00ff41]/30 focus:border-[#00ff41] p-2 text-xs text-[#00ff41] outline-none"
+                        className={`w-full p-2 text-xs outline-none rounded ${themeStyles.inputBg}`}
                         required 
                       />
                     </div>
 
-                    <button type="submit" className="w-full mt-2 bg-[#00ff41]/20 hover:bg-[#00ff41]/30 text-[#00ff41] border border-[#00ff41] py-2.5 text-xs font-bold tracking-wider transition-all">
-                      REGISTER ACCOUNT
+                    <button 
+                      type="submit" 
+                      disabled={authLoading}
+                      className={`w-full mt-2 border py-2.5 text-xs font-bold tracking-wider transition-all rounded disabled:opacity-50 ${themeStyles.buttonPrimary}`}
+                    >
+                      {authLoading ? "CREATING ACCOUNT..." : "REGISTER ACCOUNT"}
                     </button>
                   </div>
 
                   <button 
                     type="button" 
-                    onClick={() => setIsRegistering(false)}
-                    className="w-full mt-4 text-[11px] text-[#008f11] hover:text-[#00ff41] transition-colors text-center"
+                    onClick={() => {
+                      setIsRegistering(false);
+                      setAuthError(null);
+                    }}
+                    className={`w-full mt-4 text-[11px] ${themeStyles.mutedText} hover:text-blue-500 transition-colors text-center block`}
                   >
                     [ Already have an account? Sign in ]
                   </button>
@@ -689,10 +924,10 @@ export default function CryptaDocsApp() {
 
             {authState === "MFA" && (
               <motion.div key="mfa" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full max-w-md">
-                <form onSubmit={handleMfaSubmit} className="border border-[#00ff41]/60 bg-[#070d1e] p-8 text-center shadow-[0_0_30px_rgba(0,255,65,0.1)]">
-                  <ShieldAlert size={36} className="mx-auto mb-3 text-[#00ff41] animate-bounce" />
-                  <h2 className="text-sm font-bold text-[#00ff41] mb-1">TWO-FACTOR AUTHENTICATION</h2>
-                  <p className="text-xs text-[#008f11] mb-6">Enter any 6-digit code (e.g. 123456).</p>
+                <form onSubmit={handleMfaSubmit} className={`border ${themeStyles.cardBg} p-8 text-center shadow-xl rounded`}>
+                  <ShieldAlert size={36} className="mx-auto mb-3 text-blue-500 animate-bounce" />
+                  <h2 className="text-sm font-bold mb-1">TWO-FACTOR AUTHENTICATION</h2>
+                  <p className={`text-xs mb-6 ${themeStyles.mutedText}`}>Enter any 6-digit code (e.g. 123456).</p>
 
                   <input 
                     type="text" 
@@ -700,12 +935,12 @@ export default function CryptaDocsApp() {
                     value={mfaCode}
                     onChange={(e) => setMfaCode(e.target.value)}
                     placeholder="123456"
-                    className="w-full bg-[#0b132b] border border-[#00ff41] p-3 mb-6 text-center text-xl tracking-[0.5em] text-[#00ff41] outline-none"
+                    className={`w-full p-3 mb-6 text-center text-xl tracking-[0.5em] outline-none rounded ${themeStyles.inputBg}`}
                     required
                     autoFocus
                   />
 
-                  <button type="submit" className="w-full bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] py-2.5 text-xs font-bold transition-all">
+                  <button type="submit" className={`w-full border py-2.5 text-xs font-bold transition-all rounded ${themeStyles.buttonPrimary}`}>
                     VERIFY & CONTINUE
                   </button>
                 </form>
@@ -715,11 +950,11 @@ export default function CryptaDocsApp() {
         </main>
       )}
 
-      {/* 3. MAIN DASHBOARD */}
+      {/* DASHBOARD */}
       {authState === "AUTHENTICATED" && (
-        <main className="flex-1 max-w-7xl w-full mx-auto px-6 mt-20 mb-8 flex flex-col gap-6">
+        <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 mt-20 mb-8 flex flex-col gap-6">
           
-          <nav className="flex items-center gap-2 border-b border-[#00ff41]/20 pb-2">
+          <nav className="flex items-center gap-2 border-b border-blue-500/20 pb-2">
             {[
               { id: "VAULTS", label: "MY VAULTS", icon: Database },
               { id: "NOTIFICATIONS", label: "NOTIFICATIONS & UPDATES", icon: Bell },
@@ -731,10 +966,12 @@ export default function CryptaDocsApp() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as NavTab)}
-                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold transition-all border ${
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold transition-all rounded border ${
                     isActive 
-                      ? "border-[#00ff41] bg-[#00ff41]/10 text-[#00ff41]" 
-                      : "border-transparent text-[#008f11] hover:text-[#00ff41] hover:border-[#00ff41]/30"
+                      ? isDark 
+                        ? "border-blue-400 bg-blue-600/20 text-white" 
+                        : "border-[#0a1128] bg-[#0a1128] text-white"
+                      : `${themeStyles.mutedText} hover:text-blue-500 border-transparent`
                   }`}
                 >
                   <Icon size={14} /> {tab.label}
@@ -743,199 +980,207 @@ export default function CryptaDocsApp() {
             })}
           </nav>
 
-          {/* TAB 1: VAULTS LIST */}
           {activeTab === "VAULTS" && (
             <div className="space-y-6">
               
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="border border-[#00ff41]/30 bg-[#070d1e] p-3 text-center">
-                  <div className="text-[10px] text-[#008f11]">TOTAL VAULTS</div>
-                  <div className="text-xl font-bold text-[#00ff41]">{vaults.length}</div>
+                <div className={`border ${themeStyles.cardBg} p-3 text-center rounded`}>
+                  <div className={`text-[10px] ${themeStyles.mutedText}`}>TOTAL VAULTS</div>
+                  <div className="text-xl font-bold">{vaults.length}</div>
                 </div>
-                <div className="border border-[#00ff41]/30 bg-[#070d1e] p-3 text-center">
-                  <div className="text-[10px] text-[#008f11]">TOTAL FILES</div>
-                  <div className="text-xl font-bold text-[#00ff41]">{documents.length}</div>
+                <div className={`border ${themeStyles.cardBg} p-3 text-center rounded`}>
+                  <div className={`text-[10px] ${themeStyles.mutedText}`}>TOTAL FILES</div>
+                  <div className="text-xl font-bold">{documents.length}</div>
                 </div>
-                <div className="border border-[#00ff41]/30 bg-[#070d1e] p-3 text-center">
-                  <div className="text-[10px] text-[#008f11]">UNLOCKED VAULTS</div>
-                  <div className="text-xl font-bold text-[#00ff41]">{vaults.filter(v => v.isUnlocked).length}</div>
+                <div className={`border ${themeStyles.cardBg} p-3 text-center rounded`}>
+                  <div className={`text-[10px] ${themeStyles.mutedText}`}>UNLOCKED VAULTS</div>
+                  <div className="text-xl font-bold">{vaults.filter(v => v.isUnlocked).length}</div>
                 </div>
-                <div className="border border-[#00ff41]/30 bg-[#070d1e] p-3 text-center">
-                  <div className="text-[10px] text-[#008f11]">ACTIVE AGENT</div>
-                  <div className="text-xs font-bold text-[#00ff41] truncate mt-1">{user.username}</div>
+                <div className={`border ${themeStyles.cardBg} p-3 text-center rounded`}>
+                  <div className={`text-[10px] ${themeStyles.mutedText}`}>ACTIVE AGENT</div>
+                  <div className="text-xs font-bold truncate mt-1">{user.username}</div>
                 </div>
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#008f11]">EXISTING VAULTS</span>
+                  <span className={`text-xs font-bold ${themeStyles.mutedText}`}>EXISTING VAULTS</span>
                   <button
                     onClick={() => setShowCreateVaultModal(true)}
-                    className="flex items-center gap-1.5 bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] px-3 py-1.5 text-xs font-bold transition-all"
+                    className={`flex items-center gap-1.5 border px-3 py-1.5 text-xs font-bold transition-all rounded ${themeStyles.buttonPrimary}`}
                   >
                     <Plus size={14} /> ADD NEW VAULT
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {vaults.map((vault) => {
-                    const vaultFilesCount = documents.filter((doc) => doc.vaultName === vault.name).length;
+                {vaults.length === 0 ? (
+                  <div className={`border-2 border-dashed p-8 text-center rounded ${themeStyles.cardBg}`}>
+                    <FolderPlus size={32} className="mx-auto mb-2 text-blue-500" />
+                    <p className="text-xs font-bold">No vaults found in database</p>
+                    <p className={`text-[11px] ${themeStyles.mutedText} mt-1 mb-4`}>Create a new vault box to start storing encrypted files.</p>
+                    <button
+                      onClick={() => setShowCreateVaultModal(true)}
+                      className={`inline-flex items-center gap-1.5 border px-4 py-2 text-xs font-bold rounded ${themeStyles.buttonPrimary}`}
+                    >
+                      <Plus size={14} /> CREATE FIRST VAULT
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {vaults.map((vault) => {
+                      const vaultFilesCount = documents.filter((doc) => doc.vaultName === vault.name).length;
+                      const isDropdownOpen = activeDropdown === vault.id;
 
-                    return (
-                      <div 
-                        key={vault.id} 
-                        className={`border p-4 transition-all bg-[#070d1e] flex flex-col justify-between relative ${
-                          vault.isUnlocked ? "border-[#00ff41] shadow-[0_0_15px_rgba(0,255,65,0.08)]" : "border-[#00ff41]/30"
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center justify-between mb-3 border-b border-[#00ff41]/20 pb-2">
-                            <span className="text-xs font-bold tracking-wider text-[#00ff41]">{vault.name.toUpperCase()}</span>
-                            
-                            <div className="flex items-center gap-2">
-                              {vault.isUnlocked ? <Unlock size={16} className="text-[#00ff41]" /> : <Lock size={16} className="text-[#008f11]" />}
+                      return (
+                        <div 
+                          key={vault.id} 
+                          className={`border p-4 transition-all ${themeStyles.cardBg} flex flex-col justify-between relative rounded`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-3 border-b border-blue-500/20 pb-2">
+                              <span className="text-xs font-bold tracking-wider">{vault.name.toUpperCase()}</span>
                               
-                              {/* THREE DOTS MENU BUTTON */}
-                              <div className="relative z-30">
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveDropdown(activeDropdown === vault.id ? null : vault.id);
-                                  }}
-                                  className="text-[#008f11] hover:text-[#00ff41] p-1 rounded transition-colors"
-                                  title="Vault Actions"
-                                >
-                                  <MoreVertical size={16} />
-                                </button>
+                              <div className="flex items-center gap-2">
+                                {vault.isUnlocked ? <Unlock size={16} className="text-blue-400" /> : <Lock size={16} className={themeStyles.mutedText} />}
+                                
+                                <div className="relative">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveDropdown(isDropdownOpen ? null : vault.id);
+                                    }}
+                                    className={`p-1 rounded transition-colors ${themeStyles.mutedText} hover:text-blue-500`}
+                                  >
+                                    <MoreVertical size={16} />
+                                  </button>
 
-                                {/* DROPDOWN MENU */}
-                                {activeDropdown === vault.id && (
-                                  <div className="absolute right-0 top-6 w-48 bg-[#070d1e] border border-[#00ff41] shadow-[0_4px_20px_rgba(0,0,0,0.8)] py-1 rounded z-40">
-                                    <div className="px-3 py-2 text-[11px] text-[#008f11] border-b border-[#00ff41]/20 flex justify-between items-center">
-                                      <span>STORED FILES:</span>
-                                      <span className="font-bold text-[#00ff41]">{vaultFilesCount}</span>
-                                    </div>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setActiveDropdown(null);
-                                        setVaultToDelete(vault);
-                                        setDeletePinInput("");
-                                      }}
-                                      className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-950/40 hover:text-red-300 transition-colors flex items-center gap-2 font-bold"
+                                  {isDropdownOpen && (
+                                    <div 
+                                      className={`absolute right-0 top-7 w-48 ${themeStyles.cardBg} border shadow-2xl py-1 rounded z-50`}
+                                      onClick={(e) => e.stopPropagation()}
                                     >
-                                      <Trash2 size={13} /> DELETE VAULT
-                                    </button>
-                                  </div>
-                                )}
+                                      <div className={`px-3 py-2 text-[11px] ${themeStyles.mutedText} border-b border-blue-500/20 flex justify-between items-center`}>
+                                        <span>STORED FILES:</span>
+                                        <span className="font-bold">{vaultFilesCount}</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveDropdown(null);
+                                          setVaultToDelete(vault);
+                                          setDeletePinInput("");
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-500/10 transition-colors flex items-center gap-2 font-bold cursor-pointer"
+                                      >
+                                        <Trash2 size={13} /> DELETE VAULT
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {vault.isUnlocked ? (
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between bg-[#00ff41]/10 p-2 border border-[#00ff41]/30 text-[11px]">
-                                <span className="text-[#00ff41] font-bold">UNLOCKED ({vaultFilesCount} FILES)</span>
-                                <button 
-                                  onClick={() => lockVault(vault.id)}
-                                  className="text-red-400 border border-red-800 hover:border-red-500 bg-red-950/40 px-2 py-0.5 text-[10px] transition-colors"
+                            {vault.isUnlocked ? (
+                              <div className="space-y-3">
+                                <div className={`flex items-center justify-between p-2 border text-[11px] rounded ${isDark ? "bg-blue-950/40 border-blue-500/30" : "bg-blue-50 border-blue-200"}`}>
+                                  <span className="font-bold">UNLOCKED ({vaultFilesCount} FILES)</span>
+                                  <button 
+                                    onClick={() => lockVault(vault.id)}
+                                    className="text-red-500 border border-red-500/40 hover:bg-red-500/10 px-2 py-0.5 text-[10px] transition-colors rounded"
+                                  >
+                                    LOCK
+                                  </button>
+                                </div>
+
+                                <button
+                                  onClick={() => setOpenVaultModal(vault)}
+                                  className={`w-full flex items-center justify-center gap-2 border py-2.5 text-xs font-bold transition-all rounded ${themeStyles.buttonPrimary}`}
                                 >
-                                  LOCK
+                                  <FolderOpen size={15} /> OPEN VAULT BOX
                                 </button>
                               </div>
-
-                              <button
-                                onClick={() => setOpenVaultModal(vault)}
-                                className="w-full flex items-center justify-center gap-2 bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] py-2.5 text-xs font-bold transition-all"
-                              >
-                                <FolderOpen size={15} /> OPEN VAULT BOX
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-3 py-2">
-                              <p className="text-[11px] text-[#008f11]">Enter passcode to unlock vault box.</p>
-                              <input 
-                                type="password"
-                                placeholder="Enter Secret Code / PIN"
-                                value={pinInputs[vault.id] || ""}
-                                onChange={(e) => setPinInputs({ ...pinInputs, [vault.id]: e.target.value })}
-                                className="w-full bg-[#0b132b] border border-[#00ff41]/30 p-2 text-xs text-[#00ff41] outline-none focus:border-[#00ff41]"
-                              />
-                              <button 
-                                onClick={() => unlockVault(vault.id)}
-                                className="w-full bg-[#00ff41]/10 hover:bg-[#00ff41]/20 border border-[#00ff41]/50 text-[#00ff41] py-2 text-xs font-bold tracking-wider transition-all"
-                              >
-                                UNLOCK VAULT
-                              </button>
-                            </div>
-                          )}
+                            ) : (
+                              <div className="space-y-3 py-2">
+                                <p className={`text-[11px] ${themeStyles.mutedText}`}>Enter passcode to unlock vault box.</p>
+                                <input 
+                                  type="password"
+                                  placeholder="Enter Secret Code / PIN"
+                                  value={pinInputs[vault.id] || ""}
+                                  onChange={(e) => setPinInputs({ ...pinInputs, [vault.id]: e.target.value })}
+                                  className={`w-full p-2 text-xs outline-none rounded ${themeStyles.inputBg}`}
+                                />
+                                <button 
+                                  onClick={() => unlockVault(vault.id)}
+                                  className={`w-full border py-2 text-xs font-bold tracking-wider transition-all rounded ${themeStyles.buttonSecondary}`}
+                                >
+                                  UNLOCK VAULT
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 2: NOTIFICATIONS & UPDATES */}
           {activeTab === "NOTIFICATIONS" && (
-            <div className="border border-[#00ff41]/30 bg-[#070d1e] p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-[#00ff41]/20 pb-3">
+            <div className={`border ${themeStyles.cardBg} p-6 space-y-4 rounded`}>
+              <div className="flex items-center justify-between border-b border-blue-500/20 pb-3">
                 <div className="flex items-center gap-2">
-                  <Bell size={18} className="text-[#00ff41]" />
+                  <Bell size={18} className="text-blue-500" />
                   <span className="text-xs font-bold tracking-wider">SYSTEM NOTIFICATIONS & UPDATES</span>
                 </div>
-                <span className="text-[10px] text-[#008f11] bg-[#00ff41]/10 px-2 py-1 border border-[#00ff41]/30">
+                <span className={`text-[10px] ${themeStyles.mutedText} border px-2 py-1 rounded ${isDark ? "bg-blue-950/40 border-blue-500/30" : "bg-blue-50 border-blue-200"}`}>
                   {notifications.length} RECENT ANNOUNCEMENTS
                 </span>
               </div>
 
               <div className="space-y-3">
                 {notifications.map((item) => (
-                  <div key={item.id} className="border border-[#00ff41]/20 bg-[#0b132b] p-4 hover:border-[#00ff41]/60 transition-all space-y-2">
+                  <div key={item.id} className={`border p-4 transition-all space-y-2 rounded ${isDark ? "border-blue-500/20 bg-[#060c1a]" : "border-slate-200 bg-slate-50"}`}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className={`text-[9px] font-bold px-2 py-0.5 border ${
-                          item.category === "SECURITY" ? "bg-red-950/60 border-red-500 text-red-400" :
-                          item.category === "UPDATE" ? "bg-[#00ff41]/10 border-[#00ff41] text-[#00ff41]" :
-                          "bg-blue-950/60 border-blue-500 text-blue-400"
+                        <span className={`text-[9px] font-bold px-2 py-0.5 border rounded ${
+                          item.category === "SECURITY" ? "bg-red-500/10 border-red-500/40 text-red-500" : "bg-blue-500/10 border-blue-500/40 text-blue-500"
                         }`}>
                           [{item.category}]
                         </span>
-                        <h4 className="text-xs font-bold text-gray-100">{item.title}</h4>
+                        <h4 className="text-xs font-bold">{item.title}</h4>
                       </div>
-                      <span className="text-[10px] text-gray-400">{item.timestamp}</span>
+                      <span className={`text-[10px] ${themeStyles.mutedText}`}>{item.timestamp}</span>
                     </div>
-                    <p className="text-xs text-[#008f11] leading-relaxed">{item.message}</p>
+                    <p className={`text-xs ${themeStyles.mutedText} leading-relaxed`}>{item.message}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* TAB 3: LOGS */}
           {activeTab === "LOGS" && (
-            <div className="border border-[#00ff41]/30 bg-[#070d1e] p-6 h-[500px] flex flex-col">
-              <div className="flex items-center justify-between border-b border-[#00ff41]/20 pb-3 mb-4">
+            <div className={`border ${themeStyles.cardBg} p-6 h-[500px] flex flex-col rounded`}>
+              <div className="flex items-center justify-between border-b border-blue-500/20 pb-3 mb-4">
                 <div className="flex items-center gap-2">
-                  <Terminal size={16} className="text-[#00ff41]" />
+                  <Terminal size={16} className="text-blue-500" />
                   <span className="text-xs font-bold">PERSONAL LOGS ({user.username})</span>
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-2 text-xs font-mono pr-2">
                 {logs.map((log) => (
-                  <div key={log.id} className="flex items-start gap-3 border-b border-[#00ff41]/5 pb-1">
-                    <span className="text-gray-400 text-[10px]">{log.timestamp}</span>
+                  <div key={log.id} className="flex items-start gap-3 border-b border-blue-500/10 pb-1">
+                    <span className={`text-[10px] ${themeStyles.mutedText}`}>{log.timestamp}</span>
                     <span className="text-blue-400 font-bold text-[10px]">[{log.user}]</span>
                     <span className={`text-[10px] font-bold px-1 rounded ${
-                      log.type === "AUTH" ? "bg-blue-950 text-blue-400" :
-                      log.type === "VAULT" ? "bg-green-950 text-[#00ff41]" : "bg-purple-950 text-purple-400"
+                      log.type === "AUTH" ? "bg-blue-500/20 text-blue-400" :
+                      log.type === "VAULT" ? "bg-indigo-500/20 text-indigo-400" : "bg-purple-500/20 text-purple-400"
                     }`}>
                       [{log.type}]
                     </span>
-                    <span className="text-[#00ff41]/90">{log.msg}</span>
+                    <span className="opacity-90">{log.msg}</span>
                   </div>
                 ))}
               </div>
@@ -945,24 +1190,24 @@ export default function CryptaDocsApp() {
         </main>
       )}
 
-      {/* 4. INCORRECT PASSCODE POPUP MODAL */}
+      {/* INCORRECT PIN MODAL */}
       <AnimatePresence>
         {showIncorrectPinModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4`}>
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
               exit={{ scale: 0.9, opacity: 0 }} 
-              className="bg-[#070d1e] border-2 border-red-500 p-6 max-w-xs w-full text-center space-y-4 shadow-[0_0_30px_rgba(239,68,68,0.25)]"
+              className={`border-2 border-red-500 p-6 max-w-xs w-full text-center space-y-4 shadow-2xl rounded ${themeStyles.cardBg}`}
             >
               <AlertTriangle size={38} className="mx-auto text-red-500 animate-pulse" />
               <div>
-                <h3 className="font-bold text-sm text-red-400 tracking-wider">INCORRECT PASSCODE</h3>
-                <p className="text-[11px] text-gray-400 mt-1">Access denied. Please check your passcode and try again.</p>
+                <h3 className="font-bold text-sm text-red-500 tracking-wider">INCORRECT PASSCODE</h3>
+                <p className={`text-[11px] ${themeStyles.mutedText} mt-1`}>Access denied. Please check your passcode and try again.</p>
               </div>
               <button 
                 onClick={() => setShowIncorrectPinModal(false)}
-                className="w-full bg-red-950/60 hover:bg-red-900/80 border border-red-500 text-red-200 py-2 text-xs font-bold transition-all"
+                className="w-full bg-red-500/20 hover:bg-red-500/30 border border-red-500 text-red-500 py-2 text-xs font-bold transition-all rounded"
               >
                 DISMISS
               </button>
@@ -971,39 +1216,39 @@ export default function CryptaDocsApp() {
         )}
       </AnimatePresence>
 
-      {/* 5. DELETE VAULT CONFIRMATION MODAL */}
+      {/* DELETE VAULT MODAL */}
       <AnimatePresence>
         {vaultToDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4`}>
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
               exit={{ scale: 0.9, opacity: 0 }} 
-              className="bg-[#070d1e] border border-red-500 p-6 max-w-md w-full space-y-4 shadow-[0_0_30px_rgba(239,68,68,0.15)]"
+              className={`border border-red-500/50 p-6 max-w-md w-full space-y-4 shadow-2xl rounded ${themeStyles.cardBg}`}
             >
               <div className="flex items-center justify-between border-b border-red-500/30 pb-2">
-                <div className="flex items-center gap-2 font-bold text-sm text-red-400">
+                <div className="flex items-center gap-2 font-bold text-sm text-red-500">
                   <Trash2 size={16} /> DELETE VAULT: {vaultToDelete.name.toUpperCase()}
                 </div>
-                <button onClick={() => setVaultToDelete(null)} className="text-gray-400 hover:text-white">
+                <button onClick={() => setVaultToDelete(null)} className={`${themeStyles.mutedText} hover:text-red-500`}>
                   <X size={18} />
                 </button>
               </div>
 
-              <p className="text-xs text-gray-300 leading-relaxed">
-                Are you sure you want to delete <strong className="text-[#00ff41]">{vaultToDelete.name}</strong>? 
+              <p className={`text-xs ${themeStyles.mutedText} leading-relaxed`}>
+                Are you sure you want to delete <strong className="text-blue-400">{vaultToDelete.name}</strong>? 
                 This will permanently delete all files inside this vault box.
               </p>
 
               <form onSubmit={handleConfirmDeleteVault} className="space-y-4 text-xs">
                 <div>
-                  <label className="block text-red-400 mb-1 font-bold">ENTER VAULT PASSCODE TO CONFIRM</label>
+                  <label className="block text-red-500 mb-1 font-bold">ENTER VAULT PASSCODE TO CONFIRM</label>
                   <input 
                     type="password"
                     placeholder="Enter secret code / PIN"
                     value={deletePinInput}
                     onChange={(e) => setDeletePinInput(e.target.value)}
-                    className="w-full bg-[#0b132b] border border-red-500/50 p-2.5 text-xs text-[#00ff41] outline-none focus:border-red-500"
+                    className={`w-full p-2.5 text-xs outline-none rounded border-red-500/40 focus:border-red-500 ${themeStyles.inputBg}`}
                     required
                     autoFocus
                   />
@@ -1012,14 +1257,14 @@ export default function CryptaDocsApp() {
                 <div className="flex items-center gap-3 pt-2">
                   <button 
                     type="submit"
-                    className="flex-1 bg-red-950 hover:bg-red-900 border border-red-500 text-red-200 py-2.5 font-bold transition-all"
+                    className="flex-1 bg-red-600 hover:bg-red-500 border border-red-400 text-white py-2.5 font-bold transition-all rounded"
                   >
                     CONFIRM DELETION
                   </button>
                   <button 
                     type="button"
                     onClick={() => setVaultToDelete(null)}
-                    className="border border-gray-700 hover:border-gray-500 text-gray-400 px-4 py-2.5"
+                    className={`border px-4 py-2.5 rounded ${themeStyles.buttonSecondary}`}
                   >
                     CANCEL
                   </button>
@@ -1030,30 +1275,36 @@ export default function CryptaDocsApp() {
         )}
       </AnimatePresence>
 
-      {/* 6. FULL POPUP MODAL: OPEN VAULT BOX */}
+      {/* OPEN VAULT BOX MODAL */}
       <AnimatePresence>
         {openVaultModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto">
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4 overflow-y-auto`}>
             <motion.div 
               initial={{ opacity: 0, scale: 0.98 }} 
               animate={{ opacity: 1, scale: 1 }} 
               exit={{ opacity: 0, scale: 0.98 }} 
-              className="bg-[#070d1e] border-2 border-[#00ff41] p-6 max-w-4xl w-full my-8 space-y-6 shadow-[0_0_50px_rgba(0,255,65,0.15)]"
+              className={`border-2 border-blue-500 p-6 max-w-4xl w-full my-8 space-y-6 shadow-2xl rounded ${themeStyles.cardBg}`}
             >
-              {/* Modal Header */}
-              <div className="flex items-center justify-between border-b border-[#00ff41]/30 pb-4">
+              <div className="flex items-center justify-between border-b border-blue-500/30 pb-4">
                 <div className="flex items-center gap-3">
-                  <FolderOpen size={22} className="text-[#00ff41]" />
+                  <FolderOpen size={22} className="text-blue-500" />
                   <div>
-                    <h2 className="font-bold text-base text-[#00ff41]">{openVaultModal.name.toUpperCase()}</h2>
-                    <p className="text-[10px] text-[#008f11]">UNLOCKED SESSION ACTIVE</p>
+                    <h2 className="font-bold text-base">{openVaultModal.name.toUpperCase()}</h2>
+                    <p className={`text-[10px] ${themeStyles.mutedText}`}>UNLOCKED SESSION ACTIVE</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <button 
+                    onClick={() => setShowUploadModal(true)}
+                    className={`flex items-center gap-1.5 border px-3 py-1.5 text-xs font-bold transition-all rounded ${themeStyles.buttonPrimary}`}
+                  >
+                    <Plus size={15} /> UPLOAD FILE
+                  </button>
+
+                  <button 
                     onClick={() => lockVault(openVaultModal.id)}
-                    className="text-red-400 border border-red-800 hover:border-red-500 bg-red-950/40 px-3 py-1 text-xs font-bold transition-colors flex items-center gap-1.5"
+                    className="text-red-500 border border-red-500/40 hover:bg-red-500/10 px-3 py-1.5 text-xs font-bold transition-colors flex items-center gap-1.5 rounded"
                   >
                     <Lock size={13} /> LOCK & CLOSE
                   </button>
@@ -1062,40 +1313,48 @@ export default function CryptaDocsApp() {
                       setOpenVaultModal(null);
                       setActiveDoc(null);
                     }}
-                    className="text-gray-400 hover:text-white p-1"
+                    className={`${themeStyles.mutedText} hover:text-blue-500 p-1`}
                   >
                     <X size={20} />
                   </button>
                 </div>
               </div>
 
-              {/* IN-MODAL FILE INSPECTOR / DOCUMENT VIEWER PANEL */}
+              {/* IN-MODAL FILE INSPECTOR */}
               <AnimatePresence>
                 {activeDoc && activeDoc.vaultName === openVaultModal.name && (
                   <motion.div 
                     initial={{ opacity: 0, y: -10 }} 
                     animate={{ opacity: 1, y: 0 }} 
                     exit={{ opacity: 0, y: -10 }} 
-                    className="border-2 border-[#00ff41] bg-[#0b132b] p-4 rounded space-y-3"
+                    className={`border border-blue-500 p-4 rounded space-y-3 ${isDark ? "bg-[#060c1a]" : "bg-slate-100"}`}
                   >
-                    <div className="flex items-center justify-between border-b border-[#00ff41]/30 pb-2">
+                    <div className="flex items-center justify-between border-b border-blue-500/20 pb-2">
                       <div className="flex items-center gap-2">
-                        <Eye size={16} className="text-[#00ff41]" />
-                        <span className="font-bold text-xs text-[#00ff41] truncate max-w-[280px]">
+                        <Eye size={16} className="text-blue-500" />
+                        <span className="font-bold text-xs truncate max-w-[280px]">
                           INSPECTING: {activeDoc.title}
                         </span>
                       </div>
                       
                       <button 
                         onClick={() => setActiveDoc(null)}
-                        className="text-xs text-red-400 hover:text-red-300 font-bold px-2 py-0.5 border border-red-800/60 bg-red-950/30 transition-colors"
+                        className="text-xs text-red-500 hover:text-red-400 font-bold px-2 py-0.5 border border-red-500/40 rounded transition-colors"
                       >
                         CLOSE [X]
                       </button>
                     </div>
 
-                    <div className="p-2 bg-[#070d1e] border border-dashed border-[#00ff41]/40 text-xs">
-                      {activeDoc.title.toLowerCase().endsWith(".pdf") || activeDoc.content.startsWith("data:application/pdf") ? (
+                    <div className={`p-2 border border-dashed border-blue-500/40 text-xs rounded ${isDark ? "bg-[#0a1128]" : "bg-white"}`}>
+                      {isImageDoc(activeDoc) ? (
+                        <div className="flex items-center justify-center p-2 max-h-[450px] overflow-auto">
+                          <img 
+                            src={activeDoc.content} 
+                            alt={activeDoc.title} 
+                            className="max-h-[420px] w-auto object-contain rounded shadow-lg border border-blue-500/20"
+                          />
+                        </div>
+                      ) : isPdfDoc(activeDoc) ? (
                         <iframe 
                           src={activeDoc.content} 
                           className="w-full h-[450px] bg-white rounded border-0" 
@@ -1103,7 +1362,7 @@ export default function CryptaDocsApp() {
                         />
                       ) : (
                         <div className="max-h-60 overflow-y-auto p-2">
-                          <pre className="text-[#00ff41] font-mono whitespace-pre-wrap break-words font-normal">
+                          <pre className="font-mono whitespace-pre-wrap break-words font-normal">
                             {formatPreviewContent(activeDoc.content)}
                           </pre>
                         </div>
@@ -1113,177 +1372,159 @@ export default function CryptaDocsApp() {
                 )}
               </AnimatePresence>
 
-              {/* Grid: Stored Files vs Upload Box */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* STORED FILES LIST */}
-                <div className="space-y-4 border border-[#00ff41]/20 p-4 bg-[#0b132b]/60">
-                  <div className="flex items-center justify-between border-b border-[#00ff41]/20 pb-2">
-                    <span className="text-xs font-bold text-[#00ff41] flex items-center gap-1.5">
-                      <FileText size={14} /> FILES IN THIS VAULT
-                    </span>
-                    <span className="text-[10px] text-[#008f11]">
-                      {documents.filter(d => d.vaultName === openVaultModal.name).length} TOTAL
-                    </span>
-                  </div>
+              {/* STORED FILES LIST */}
+              <div className={`space-y-4 border p-4 rounded ${isDark ? "border-blue-500/20 bg-[#060c1a]" : "border-slate-200 bg-slate-50"}`}>
+                <div className="flex items-center justify-between border-b border-blue-500/20 pb-2">
+                  <span className="text-xs font-bold flex items-center gap-1.5">
+                    <FileText size={14} className="text-blue-500" /> FILES IN THIS VAULT
+                  </span>
+                  
+                  <span className={`text-[10px] ${themeStyles.mutedText} font-bold`}>
+                    {documents.filter(d => d.vaultName === openVaultModal.name).length} TOTAL
+                  </span>
+                </div>
 
-                  <div className="space-y-2.5 max-h-[350px] overflow-y-auto pr-1">
-                    {documents.filter(d => d.vaultName === openVaultModal.name).length === 0 ? (
-                      <div className="text-xs text-gray-500 italic p-6 border border-dashed border-[#00ff41]/20 text-center">
-                        Vault is empty. Drag and drop files on the right to upload.
-                      </div>
-                    ) : (
-                      documents
-                        .filter(d => d.vaultName === openVaultModal.name)
-                        .map((doc) => (
-                          <div key={doc.id} className="border border-[#00ff41]/30 p-3 bg-[#070d1e] hover:border-[#00ff41] transition-all">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-xs font-bold text-gray-100 truncate max-w-[180px]">{doc.title}</span>
-                              
-                              <button
-                                onClick={() => triggerInspect(doc)}
-                                className="text-[10px] border border-[#00ff41] hover:bg-[#00ff41]/20 text-[#00ff41] px-2 py-0.5 font-bold transition-all flex items-center gap-1"
-                              >
-                                <Eye size={11} /> VIEW
-                              </button>
-                            </div>
-                            <div className="flex items-center justify-between text-[10px] text-[#008f11]">
+                <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
+                  {documents.filter(d => d.vaultName === openVaultModal.name).length === 0 ? (
+                    <div 
+                      onClick={() => setShowUploadModal(true)}
+                      className={`text-xs italic p-8 border-2 border-dashed border-blue-500/30 text-center rounded cursor-pointer hover:border-blue-400 transition-all ${themeStyles.mutedText}`}
+                    >
+                      <Plus size={24} className="mx-auto mb-2 text-blue-500" />
+                      Vault is empty. Click here or use the <strong className="text-blue-400">+ UPLOAD FILE</strong> button at the top to add files.
+                    </div>
+                  ) : (
+                    documents
+                      .filter(d => d.vaultName === openVaultModal.name)
+                      .map((doc) => (
+                        <div key={doc.id} className={`border p-3 hover:border-blue-500 transition-all rounded flex items-center justify-between gap-4 ${themeStyles.cardBg}`}>
+                          <div className="truncate flex-1">
+                            <h4 className="text-xs font-bold truncate">{doc.title}</h4>
+                            <div className={`flex items-center gap-3 text-[10px] ${themeStyles.mutedText} mt-1`}>
                               <span>SIZE: {doc.size}</span>
+                              <span>•</span>
                               <span>{doc.createdAt}</span>
                             </div>
                           </div>
-                        ))
-                    )}
-                  </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => triggerInspect(doc)}
+                              className={`text-[11px] border px-2.5 py-1 font-bold transition-all flex items-center gap-1 rounded ${themeStyles.buttonSecondary}`}
+                            >
+                              <Eye size={12} /> VIEW
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteFile(doc.id, doc.title)}
+                              className="text-[11px] border border-red-500/40 hover:border-red-500 bg-red-500/10 hover:bg-red-500/20 text-red-500 px-2.5 py-1 font-bold transition-all flex items-center gap-1 rounded"
+                              title="Delete File"
+                            >
+                              <Trash2 size={12} /> DELETE
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                  )}
                 </div>
-
-                {/* UPLOAD FILE FORM IN MODAL */}
-                <div className="space-y-4 border border-[#00ff41]/20 p-4 bg-[#0b132b]/60">
-                  <span className="text-xs font-bold text-[#00ff41] flex items-center gap-1.5 border-b border-[#00ff41]/20 pb-2">
-                    <Upload size={14} /> UPLOAD FILE TO THIS VAULT
-                  </span>
-
-                  <input 
-                    type="file" 
-                    ref={modalFileInputRef} 
-                    className="hidden" 
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        processUploadedFile(e.target.files[0]);
-                      }
-                    }}
-                  />
-
-                  <form onSubmit={handleModalUploadSubmit} className="space-y-3">
-                    <div 
-                      onClick={() => modalFileInputRef.current?.click()}
-                      onDragOver={(e) => { e.preventDefault(); setModalDragActive(true); }}
-                      onDragLeave={() => setModalDragActive(false)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        setModalDragActive(false);
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          processUploadedFile(e.dataTransfer.files[0]);
-                        }
-                      }}
-                      className={`border-2 border-dashed p-4 text-center transition-all cursor-pointer ${
-                        modalDragActive ? "border-[#00ff41] bg-[#00ff41]/10" : "border-[#00ff41]/30 hover:border-[#00ff41]/60"
-                      }`}
-                    >
-                      <Upload size={24} className="mx-auto mb-1 text-[#008f11]" />
-                      <p className="text-[11px] text-[#00ff41] font-bold">Click to choose or drop real file here</p>
-                      <p className="text-[9px] text-[#008f11]">Supports PDF and Text formats</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] text-[#008f11] mb-1">FILE NAME</label>
-                      <input 
-                        type="text"
-                        placeholder="e.g. Passcodes.txt"
-                        value={modalUploadTitle}
-                        onChange={(e) => setModalUploadTitle(e.target.value)}
-                        className="w-full bg-[#070d1e] border border-[#00ff41]/30 p-2 text-xs text-[#00ff41] outline-none focus:border-[#00ff41]"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] text-[#008f11] mb-1">FILE CONTENT / DATA</label>
-                      <textarea 
-                        rows={3}
-                        placeholder="File data payload..."
-                        value={modalUploadContent}
-                        onChange={(e) => setModalUploadContent(e.target.value)}
-                        className="w-full bg-[#070d1e] border border-[#00ff41]/30 p-2 text-xs text-[#00ff41] outline-none focus:border-[#00ff41]"
-                      />
-                    </div>
-
-                    <button 
-                      type="submit" 
-                      disabled={modalIsUploading}
-                      className="w-full bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] py-2 text-xs font-bold transition-all"
-                    >
-                      {modalIsUploading ? "ENCRYPTING..." : `SAVE TO ${openVaultModal.name.toUpperCase()}`}
-                    </button>
-                  </form>
-                </div>
-
               </div>
+
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* 7. MODAL: CREATE NEW VAULT */}
+      {/* POPUP UPLOAD MODAL */}
       <AnimatePresence>
-        {showCreateVaultModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#070d1e] border border-[#00ff41] p-6 max-w-md w-full space-y-4">
-              <div className="flex items-center justify-between border-b border-[#00ff41]/30 pb-2">
+        {showUploadModal && openVaultModal && (
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4`}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }} 
+              className={`border-2 border-blue-500 p-6 max-w-lg w-full space-y-4 shadow-2xl rounded ${themeStyles.cardBg}`}
+            >
+              <div className="flex items-center justify-between border-b border-blue-500/30 pb-3">
                 <div className="flex items-center gap-2 font-bold text-sm">
-                  <FolderPlus size={16} /> CREATE A NEW VAULT
+                  <Upload size={18} className="text-blue-500" /> UPLOAD FILE TO {openVaultModal.name.toUpperCase()}
                 </div>
-                <button onClick={() => setShowCreateVaultModal(false)} className="text-gray-400 hover:text-white">
-                  <X size={18} />
+                <button 
+                  onClick={() => setShowUploadModal(false)} 
+                  className={`${themeStyles.mutedText} hover:text-blue-500`}
+                >
+                  <X size={20} />
                 </button>
               </div>
 
-              <form onSubmit={handleCreateVaultSubmit} className="space-y-4 text-xs">
+              <input 
+                type="file" 
+                ref={modalFileInputRef} 
+                accept="image/*,.pdf,.txt,.md,.json,.csv"
+                className="hidden" 
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    processUploadedFile(e.target.files[0]);
+                  }
+                }}
+              />
+
+              <form onSubmit={handleModalUploadSubmit} className="space-y-4">
+                <div 
+                  onClick={() => modalFileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setModalDragActive(true); }}
+                  onDragLeave={() => setModalDragActive(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setModalDragActive(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      processUploadedFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  className={`border-2 border-dashed p-6 text-center transition-all cursor-pointer rounded ${
+                    modalDragActive ? "border-blue-500 bg-blue-500/10" : "border-blue-500/40 hover:border-blue-500 hover:bg-blue-500/5"
+                  }`}
+                >
+                  <Upload size={32} className="mx-auto mb-2 text-blue-500 animate-pulse" />
+                  <p className="text-xs font-bold">Click to choose or drop real file here</p>
+                  <p className={`text-[10px] ${themeStyles.mutedText} mt-1`}>Supports Images (PNG, JPG, WEBP), PDF, and Text</p>
+                </div>
+
                 <div>
-                  <label className="block text-[#008f11] mb-1">VAULT NAME</label>
+                  <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>FILE NAME</label>
                   <input 
                     type="text"
-                    placeholder="e.g. Personal Documents"
-                    value={newVaultName}
-                    onChange={(e) => setNewVaultName(e.target.value)}
-                    className="w-full bg-[#0b132b] border border-[#00ff41]/30 p-2.5 text-xs text-[#00ff41] outline-none focus:border-[#00ff41]"
+                    placeholder="e.g. Passcodes.txt"
+                    value={modalUploadTitle}
+                    onChange={(e) => setModalUploadTitle(e.target.value)}
+                    className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[#008f11] mb-1">SET SECRET PIN / ACCESS CODE</label>
-                  <input 
-                    type="password"
-                    placeholder="Set secret code (e.g. 9999)"
-                    value={newVaultPin}
-                    onChange={(e) => setNewVaultPin(e.target.value)}
-                    className="w-full bg-[#0b132b] border border-[#00ff41]/30 p-2.5 text-xs text-[#00ff41] outline-none focus:border-[#00ff41]"
-                    required
+                  <label className={`block text-[11px] mb-1 ${themeStyles.mutedText}`}>FILE CONTENT / DATA</label>
+                  <textarea 
+                    rows={3}
+                    placeholder="File data payload..."
+                    value={modalUploadContent}
+                    onChange={(e) => setModalUploadContent(e.target.value)}
+                    className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
                   />
                 </div>
 
                 <div className="flex items-center gap-3 pt-2">
                   <button 
-                    type="submit"
-                    className="flex-1 bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] py-2.5 font-bold transition-all"
+                    type="submit" 
+                    disabled={modalIsUploading}
+                    className={`flex-1 border py-2.5 text-xs font-bold transition-all rounded disabled:opacity-50 ${themeStyles.buttonPrimary}`}
                   >
-                    CREATE VAULT
+                    {modalIsUploading ? "ENCRYPTING..." : `SAVE TO ${openVaultModal.name.toUpperCase()}`}
                   </button>
+                  
                   <button 
-                    type="button"
-                    onClick={() => setShowCreateVaultModal(false)}
-                    className="border border-gray-700 hover:border-gray-500 text-gray-400 px-4 py-2.5"
+                    type="button" 
+                    onClick={() => setShowUploadModal(false)}
+                    className={`border px-4 py-2.5 text-xs font-bold rounded ${themeStyles.buttonSecondary}`}
                   >
                     CANCEL
                   </button>
@@ -1294,29 +1535,90 @@ export default function CryptaDocsApp() {
         )}
       </AnimatePresence>
 
-      {/* 8. HELP MODAL */}
+      {/* CREATE VAULT MODAL */}
       <AnimatePresence>
-        {showHelpModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#070d1e] border border-[#00ff41] p-6 max-w-lg w-full space-y-4">
-              <div className="flex items-center justify-between border-b border-[#00ff41]/30 pb-2">
+        {showCreateVaultModal && (
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4`}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className={`border border-blue-500/50 p-6 max-w-md w-full space-y-4 shadow-2xl rounded ${themeStyles.cardBg}`}>
+              <div className="flex items-center justify-between border-b border-blue-500/30 pb-2">
                 <div className="flex items-center gap-2 font-bold text-sm">
-                  <Info size={16} /> HELP
+                  <FolderPlus size={16} className="text-blue-500" /> CREATE A NEW VAULT
                 </div>
-                <button onClick={() => setShowHelpModal(false)} className="text-gray-400 hover:text-white">
+                <button onClick={() => setShowCreateVaultModal(false)} className={`${themeStyles.mutedText} hover:text-blue-500`}>
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="text-xs space-y-3 text-gray-300 leading-relaxed">
-                <p><strong className="text-[#00ff41]">1. Profile Setup:</strong> Click the profile icon in the top right to upload your avatar image and manage your profile details.</p>
-                <p><strong className="text-[#00ff41]">2. Unlock Vault:</strong> Enter passcode to open standard or custom vaults.</p>
-                <p><strong className="text-[#00ff41]">3. File Upload:</strong> Click or drag & drop files directly into an opened vault box.</p>
+              <form onSubmit={handleCreateVaultSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className={`block mb-1 ${themeStyles.mutedText}`}>VAULT NAME</label>
+                  <input 
+                    type="text"
+                    placeholder="e.g. Personal Documents"
+                    value={newVaultName}
+                    onChange={(e) => setNewVaultName(e.target.value)}
+                    className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={`block mb-1 ${themeStyles.mutedText}`}>SET SECRET PIN / ACCESS CODE</label>
+                  <input 
+                    type="password"
+                    placeholder="Set secret code (e.g. 9999)"
+                    value={newVaultPin}
+                    onChange={(e) => setNewVaultPin(e.target.value)}
+                    className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
+                    required
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button 
+                    type="submit"
+                    className={`flex-1 border py-2.5 font-bold transition-all rounded ${themeStyles.buttonPrimary}`}
+                  >
+                    CREATE VAULT
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setShowCreateVaultModal(false)}
+                    className={`border px-4 py-2.5 rounded ${themeStyles.buttonSecondary}`}
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* HELP MODAL */}
+      <AnimatePresence>
+        {showHelpModal && (
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4`}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className={`border border-blue-500/50 p-6 max-w-lg w-full space-y-4 shadow-2xl rounded ${themeStyles.cardBg}`}>
+              <div className="flex items-center justify-between border-b border-blue-500/30 pb-2">
+                <div className="flex items-center gap-2 font-bold text-sm">
+                  <Info size={16} className="text-blue-500" /> HELP
+                </div>
+                <button onClick={() => setShowHelpModal(false)} className={`${themeStyles.mutedText} hover:text-blue-500`}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className={`text-xs space-y-3 ${themeStyles.mutedText} leading-relaxed`}>
+                <p><strong className="text-blue-400">1. Theme Switcher:</strong> Toggle between Dark Blue mode and Light mode using the Sun/Moon button.</p>
+                <p><strong className="text-blue-400">2. Profile Setup:</strong> Click the profile icon in top right to upload avatar images and view profile details.</p>
+                <p><strong className="text-blue-400">3. Unlock Vault:</strong> Enter passcode to open standard or custom vaults stored in MongoDB.</p>
+                <p><strong className="text-blue-400">4. Delete Vault:</strong> Open the options menu on any vault card and select <strong>DELETE VAULT</strong> to enter passcode confirmation.</p>
               </div>
 
               <button 
                 onClick={() => setShowHelpModal(false)}
-                className="w-full bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] py-2 text-xs font-bold"
+                className={`w-full border py-2 text-xs font-bold rounded ${themeStyles.buttonPrimary}`}
               >
                 GOT IT
               </button>
@@ -1325,30 +1627,30 @@ export default function CryptaDocsApp() {
         )}
       </AnimatePresence>
 
-      {/* 9. CONTACT MODAL */}
+      {/* CONTACT MODAL */}
       <AnimatePresence>
         {showContactModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#070d1e] border border-[#00ff41] p-6 max-w-md w-full space-y-4">
-              <div className="flex items-center justify-between border-b border-[#00ff41]/30 pb-2">
+          <div className={`fixed inset-0 z-50 flex items-center justify-center ${themeStyles.modalOverlay} p-4`}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className={`border border-blue-500/50 p-6 max-w-md w-full space-y-4 shadow-2xl rounded ${themeStyles.cardBg}`}>
+              <div className="flex items-center justify-between border-b border-blue-500/30 pb-2">
                 <div className="flex items-center gap-2 font-bold text-sm">
-                  <Mail size={16} /> CONTACT SUPPORT
+                  <Mail size={16} className="text-blue-500" /> CONTACT SUPPORT
                 </div>
-                <button onClick={() => setShowContactModal(false)} className="text-gray-400 hover:text-white">
+                <button onClick={() => setShowContactModal(false)} className={`${themeStyles.mutedText} hover:text-blue-500`}>
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="text-xs space-y-3 text-gray-300">
-                <div className="bg-[#0b132b] p-3 border border-[#00ff41]/30 space-y-2 text-[11px]">
-                  <div><span className="text-[#008f11]">SUPPORT EMAIL:</span> support@cryptadocs.local</div>
-                  <div><span className="text-[#008f11]">ADMIN EMAIL:</span> admin@cryptadocs.local</div>
+              <div className="text-xs space-y-3">
+                <div className={`p-3 border rounded space-y-2 text-[11px] ${isDark ? "bg-[#060c1a] border-blue-500/30" : "bg-slate-50 border-slate-200"}`}>
+                  <div><span className={`font-bold ${themeStyles.mutedText}`}>SUPPORT EMAIL:</span> support@cryptadocs.local</div>
+                  <div><span className={`font-bold ${themeStyles.mutedText}`}>ADMIN EMAIL:</span> admin@cryptadocs.local</div>
                 </div>
               </div>
 
               <button 
                 onClick={() => setShowContactModal(false)}
-                className="w-full bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41] text-[#00ff41] py-2 text-xs font-bold"
+                className={`w-full border py-2 text-xs font-bold rounded ${themeStyles.buttonPrimary}`}
               >
                 CLOSE
               </button>
@@ -1357,9 +1659,9 @@ export default function CryptaDocsApp() {
         )}
       </AnimatePresence>
 
-      {/* 10. FOOTER */}
-      <footer className="border-t border-[#00ff41]/20 bg-[#0c1938] px-6 py-2 text-[10px] text-[#008f11] flex justify-between items-center">
-        <div>CONNECTED TO SECURE LOCAL SERVER</div>
+      {/* FOOTER */}
+      <footer className={`relative z-10 border-t px-6 py-2 text-[10px] flex justify-between items-center transition-colors duration-300 ${isDark ? "bg-[#060c1a]/90 border-white/10 text-blue-200/60" : "bg-white/90 border-slate-200 text-slate-500"}`}>
+        <div>CONNECTED TO SECURE MONGODB SERVER</div>
         <div>ENCRYPTION ACTIVE</div>
       </footer>
 

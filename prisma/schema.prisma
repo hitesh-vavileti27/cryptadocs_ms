@@ -6,59 +6,74 @@ generator client {
   provider = "prisma-client-js"
 }
 
-generator client {
-  provider = "prisma-client-js"
+enum LogType {
+  AUTH
+  VAULT
+  SYS
+  ENCRYPT
 }
 
 model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
-  email     String   @unique
-  phone     String
-  dob       String
-  password  String
-  avatarUrl String?  @db.Text
-  createdAt DateTime @default(now())
+  id           String     @id @default(uuid())
+  username     String     @unique
+  email        String     @unique
+  phone        String?
+  dob          DateTime?
+  passwordHash String     @map("password_hash")
+  mfaSecret    String?    @map("mfa_secret")
+  avatarUrl    String?    @map("avatar_url")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  vaults Vault[]
-  logs   Log[]
+  vaults       Vault[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
 }
 
 model Vault {
   id        String     @id @default(uuid())
+  userId    String     @map("user_id")
   name      String
-  pin       String
-  userId    String
+  pinHash   String     @map("pin_hash")
+  pinSalt   String     @map("pin_salt")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   documents Document[]
-  createdAt DateTime   @default(now())
+
+  @@index([userId])
+  @@map("vaults")
 }
 
 model Document {
-  id        String   @id @default(uuid())
-  title     String
-  size      String
-  hash      String
-  content   String   @db.Text
-  vaultId   String
-  vault     Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id               String   @id @default(uuid())
+  vaultId          String   @map("vault_id")
+  title            String
+  encryptedContent String   @map("encrypted_content") @db.Text
+  contentHash      String   @map("content_hash")
+  fileSize         String   @map("file_size")
+  mimeType         String?  @map("mime_type")
+  iv               String
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  vault            Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@index([vaultId])
+  @@map("documents")
 }
 
-model Notification {
+model AuditLog {
   id        String   @id @default(uuid())
-  title     String
-  category  String
+  userId    String   @map("user_id")
+  action    LogType
   message   String
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
-}
+  createdAt DateTime @default(now()) @map("created_at")
 
-model Log {
-  id        String   @id @default(uuid())
-  type      String
-  msg       String
-  userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("audit_logs")
 }
