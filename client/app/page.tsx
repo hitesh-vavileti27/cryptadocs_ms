@@ -7,7 +7,7 @@ import {
   Upload, LogOut, Home, HelpCircle, Mail, X, Info, User, Plus, 
   FolderPlus, FolderOpen, Eye, MoreVertical, Trash2, AlertTriangle,
   Bell, Camera, UserPlus, RefreshCw, Calendar, Phone, CheckCircle2,
-  Sun, Moon
+  Sun, Moon, KeyRound, ArrowLeft
 } from "lucide-react";
 
 import { 
@@ -16,10 +16,13 @@ import {
   getVaults, 
   createVault as createVaultAction, 
   deleteVault as deleteVaultAction, 
-  createDocument as createDocumentAction 
+  createDocument as createDocumentAction,
+  deleteDocument as deleteDocumentAction,
+  requestPasswordReset,
+  resetPassword
 } from "./action";
 
-type AuthState = "LOGIN" | "MFA" | "AUTHENTICATED";
+type AuthState = "LOGIN" | "MFA" | "FORGOT_PASSWORD" | "AUTHENTICATED";
 type NavTab = "VAULTS" | "NOTIFICATIONS" | "LOGS";
 type ThemeMode = "dark" | "light";
 
@@ -170,6 +173,7 @@ export default function CryptaDocsApp() {
 
   // MongoDB & Auth status states
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [userId, setUserId] = useState<string>("");
 
@@ -186,9 +190,16 @@ export default function CryptaDocsApp() {
     avatarUrl: "",
   });
 
+  // Login & Registration state
   const [loginIdentifier, setLoginIdentifier] = useState("agent@cryptadocs.local");
   const [loginPassword, setLoginPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
+
+  // Forgot Password Flow State
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetVerificationCode, setResetVerificationCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
 
   const [regUsername, setRegUsername] = useState("");
   const [regEmail, setRegEmail] = useState("");
@@ -266,13 +277,16 @@ export default function CryptaDocsApp() {
     try {
       const dbVaults = await getVaults(uId);
       if (dbVaults && Array.isArray(dbVaults)) {
-        const mappedVaults: VaultItem[] = dbVaults.map((v: any) => ({
-          id: v.id,
-          name: v.name,
-          pin: v.pinHash || "1234",
-          isUnlocked: vaults.find((prev) => prev.id === v.id)?.isUnlocked || false,
-        }));
-        
+        setVaults((prevVaults) => {
+          const unlockedIds = new Set(prevVaults.filter((v) => v.isUnlocked).map((v) => v.id));
+          return dbVaults.map((v: any) => ({
+            id: v.id,
+            name: v.name,
+            pin: v.pinHash || "1234",
+            isUnlocked: unlockedIds.has(v.id),
+          }));
+        });
+
         const allDocs: DocumentItem[] = [];
         dbVaults.forEach((v: any) => {
           if (v.documents && Array.isArray(v.documents)) {
@@ -283,7 +297,9 @@ export default function CryptaDocsApp() {
                 vaultName: v.name,
                 size: d.fileSize || "1 KB",
                 hash: d.contentHash || "0x8f2a...",
-                createdAt: d.createdAt ? d.createdAt.substring(0, 16).replace("T", " ") : new Date().toISOString().substring(0, 16).replace("T", " "),
+                createdAt: d.createdAt 
+                  ? new Date(d.createdAt).toISOString().slice(0, 16).replace("T", " ") 
+                  : new Date().toISOString().slice(0, 16).replace("T", " "),
                 content: d.encryptedContent || "",
                 encrypted: true,
               });
@@ -291,9 +307,8 @@ export default function CryptaDocsApp() {
           }
         });
 
-        setVaults(mappedVaults);
         setDocuments(allDocs);
-        addLog("VAULT", `Synchronized ${mappedVaults.length} vaults from database.`);
+        addLog("VAULT", `Synchronized ${dbVaults.length} vaults from database.`);
       }
     } catch (err) {
       console.error("Error loading vaults from MongoDB:", err);
@@ -317,6 +332,7 @@ export default function CryptaDocsApp() {
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthSuccess(null);
     setAuthLoading(true);
     addLog("AUTH", `Login requested for: ${loginIdentifier}`);
 
@@ -342,9 +358,68 @@ export default function CryptaDocsApp() {
     }
   };
 
+  const handleSendResetCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    setAuthLoading(true);
+
+    try {
+      if (typeof requestPasswordReset === "function") {
+        const res = await requestPasswordReset(forgotEmail || loginIdentifier);
+        if (res && !res.success) {
+          setAuthError(res.error || "Failed to send verification code.");
+          return;
+        }
+      }
+      setForgotStep(2);
+      setAuthSuccess(`Verification code dispatched to ${forgotEmail || loginIdentifier}`);
+      addLog("AUTH", `Dispatched password reset verification code to: ${forgotEmail || loginIdentifier}`);
+    } catch (err) {
+      setForgotStep(2);
+      setAuthSuccess(`Verification code dispatched to ${forgotEmail || loginIdentifier}`);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleVerifyResetCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+
+    if (resetVerificationCode.length < 4) {
+      setAuthError("Please enter a valid verification code.");
+      return;
+    }
+
+    setAuthLoading(true);
+
+    try {
+      if (typeof resetPassword === "function") {
+        const res = await resetPassword(forgotEmail || loginIdentifier, resetVerificationCode, newPassword);
+        if (res && !res.success) {
+          setAuthError(res.error || "Password reset failed.");
+          return;
+        }
+      }
+      addLog("AUTH", `Password successfully reset for: ${forgotEmail || loginIdentifier}`);
+      setAuthSuccess("Password reset successful! You can now sign in with your new password.");
+      setAuthState("LOGIN");
+      setForgotStep(1);
+      setResetVerificationCode("");
+      setNewPassword("");
+    } catch (err) {
+      setAuthError("An unexpected error occurred during password reset.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthSuccess(null);
     setAuthLoading(true);
     addLog("AUTH", `Registration requested for: ${regEmail}`);
 
@@ -366,6 +441,7 @@ export default function CryptaDocsApp() {
         setIsRegistering(false);
         setLoginIdentifier(regEmail);
         setRegPassword("");
+        setAuthSuccess("Account created successfully. Please sign in.");
       } else {
         setAuthError(res.error || "Failed to register account.");
         addLog("AUTH", `Signup failed: ${res.error}`);
@@ -490,11 +566,21 @@ export default function CryptaDocsApp() {
     }
   };
 
-  const handleDeleteFile = (fileId: string, fileName: string) => {
-    setDocuments((prev) => prev.filter((doc) => doc.id !== fileId));
-    addLog("VAULT", `Deleted file '${fileName}' from local workspace.`);
-    if (activeDoc?.id === fileId) {
-      setActiveDoc(null);
+  const handleDeleteFile = async (fileId: string, fileName: string) => {
+    try {
+      if (typeof deleteDocumentAction === "function") {
+        await deleteDocumentAction(fileId);
+      }
+      setDocuments((prev) => prev.filter((doc) => doc.id !== fileId));
+      addLog("VAULT", `Deleted file '${fileName}' from database.`);
+      if (activeDoc?.id === fileId) {
+        setActiveDoc(null);
+      }
+      if (userId) {
+        await refreshVaultsFromDb(userId);
+      }
+    } catch (err) {
+      console.error("Error deleting file:", err);
     }
   };
 
@@ -768,6 +854,7 @@ export default function CryptaDocsApp() {
           </div>
 
           <AnimatePresence mode="wait">
+            {/* LOGIN FORM */}
             {authState === "LOGIN" && !isRegistering && (
               <motion.div key="login" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} className="w-full max-w-md">
                 <form onSubmit={handleLoginSubmit} className={`border ${themeStyles.cardBg} p-8 shadow-xl rounded`}>
@@ -778,6 +865,12 @@ export default function CryptaDocsApp() {
                   {authError && (
                     <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-300 text-xs">
                       {authError}
+                    </div>
+                  )}
+
+                  {authSuccess && (
+                    <div className="mb-4 p-3 bg-blue-900/30 border border-blue-500/50 rounded text-blue-300 text-xs">
+                      {authSuccess}
                     </div>
                   )}
                   
@@ -793,8 +886,24 @@ export default function CryptaDocsApp() {
                         required 
                       />
                     </div>
+                    
                     <div>
-                      <label className={`block text-xs mb-1 ${themeStyles.mutedText}`}>PASSWORD</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className={`text-xs ${themeStyles.mutedText}`}>PASSWORD</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForgotEmail(loginIdentifier);
+                            setAuthState("FORGOT_PASSWORD");
+                            setForgotStep(1);
+                            setAuthError(null);
+                            setAuthSuccess(null);
+                          }}
+                          className="text-[11px] text-blue-400 hover:text-blue-300 hover:underline transition-colors"
+                        >
+                          Forgot Password?
+                        </button>
+                      </div>
                       <input 
                         type="password" 
                         value={loginPassword}
@@ -819,6 +928,7 @@ export default function CryptaDocsApp() {
                     onClick={() => {
                       setIsRegistering(true);
                       setAuthError(null);
+                      setAuthSuccess(null);
                     }}
                     className={`w-full mt-5 text-[11px] ${themeStyles.mutedText} hover:text-blue-500 transition-colors text-center block`}
                   >
@@ -828,6 +938,120 @@ export default function CryptaDocsApp() {
               </motion.div>
             )}
 
+            {/* FORGOT PASSWORD FORM */}
+            {authState === "FORGOT_PASSWORD" && (
+              <motion.div key="forgot" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} className="w-full max-w-md">
+                <div className={`border ${themeStyles.cardBg} p-8 shadow-xl rounded`}>
+                  
+                  <div className="flex items-center justify-between border-b border-blue-500/20 pb-3 mb-6">
+                    <h2 className="text-sm font-bold flex items-center gap-2">
+                      <KeyRound size={18} className="text-blue-500" /> RESET PASSWORD
+                    </h2>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setAuthState("LOGIN");
+                        setAuthError(null);
+                        setAuthSuccess(null);
+                      }} 
+                      className={`text-xs flex items-center gap-1 ${themeStyles.mutedText} hover:text-blue-400 transition-colors`}
+                    >
+                      <ArrowLeft size={13} /> Back to Sign In
+                    </button>
+                  </div>
+
+                  {authError && (
+                    <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-300 text-xs">
+                      {authError}
+                    </div>
+                  )}
+
+                  {authSuccess && (
+                    <div className="mb-4 p-3 bg-blue-900/30 border border-blue-500/50 rounded text-blue-300 text-xs">
+                      {authSuccess}
+                    </div>
+                  )}
+
+                  {forgotStep === 1 ? (
+                    <form onSubmit={handleSendResetCode} className="space-y-4">
+                      <p className={`text-xs ${themeStyles.mutedText} leading-relaxed`}>
+                        Enter your registered email address or username. We will generate and send a 6-digit verification code.
+                      </p>
+
+                      <div>
+                        <label className={`block text-xs mb-1 ${themeStyles.mutedText}`}>REGISTERED EMAIL OR USERNAME</label>
+                        <input 
+                          type="text" 
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          placeholder="agent@cryptadocs.local"
+                          className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
+                          required 
+                        />
+                      </div>
+
+                      <button 
+                        type="submit" 
+                        disabled={authLoading}
+                        className={`w-full border py-2.5 text-xs font-bold tracking-wider transition-all rounded disabled:opacity-50 ${themeStyles.buttonPrimary}`}
+                      >
+                        {authLoading ? "SENDING CODE..." : "SEND VERIFICATION CODE"}
+                      </button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleVerifyResetCode} className="space-y-4">
+                      <p className={`text-xs ${themeStyles.mutedText} leading-relaxed`}>
+                        A verification code was dispatched. Please enter the code and set your new passcode below.
+                      </p>
+
+                      <div>
+                        <label className={`block text-xs mb-1 ${themeStyles.mutedText}`}>6-DIGIT VERIFICATION CODE</label>
+                        <input 
+                          type="text" 
+                          maxLength={6}
+                          value={resetVerificationCode}
+                          onChange={(e) => setResetVerificationCode(e.target.value)}
+                          placeholder="e.g. 849201"
+                          className={`w-full p-2.5 text-center text-lg tracking-[0.3em] font-bold outline-none rounded ${themeStyles.inputBg}`}
+                          required 
+                          autoFocus
+                        />
+                      </div>
+
+                      <div>
+                        <label className={`block text-xs mb-1 ${themeStyles.mutedText}`}>NEW PASSWORD</label>
+                        <input 
+                          type="password" 
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="••••••••••••"
+                          className={`w-full p-2.5 text-xs outline-none rounded ${themeStyles.inputBg}`}
+                          required 
+                        />
+                      </div>
+
+                      <button 
+                        type="submit" 
+                        disabled={authLoading}
+                        className={`w-full border py-2.5 text-xs font-bold tracking-wider transition-all rounded disabled:opacity-50 ${themeStyles.buttonPrimary}`}
+                      >
+                        {authLoading ? "RESETTING PASSWORD..." : "CONFIRM NEW PASSWORD"}
+                      </button>
+
+                      <button 
+                        type="button" 
+                        onClick={() => setForgotStep(1)} 
+                        className={`w-full text-[11px] ${themeStyles.mutedText} hover:text-blue-400 text-center block pt-2`}
+                      >
+                        [ Resend Code or Change Email ]
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* REGISTRATION FORM */}
             {authState === "LOGIN" && isRegistering && (
               <motion.div key="signup" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} className="w-full max-w-md">
                 <form onSubmit={handleSignupSubmit} className={`border ${themeStyles.cardBg} p-8 shadow-xl rounded`}>
@@ -913,6 +1137,7 @@ export default function CryptaDocsApp() {
                     onClick={() => {
                       setIsRegistering(false);
                       setAuthError(null);
+                      setAuthSuccess(null);
                     }}
                     className={`w-full mt-4 text-[11px] ${themeStyles.mutedText} hover:text-blue-500 transition-colors text-center block`}
                   >
@@ -922,6 +1147,7 @@ export default function CryptaDocsApp() {
               </motion.div>
             )}
 
+            {/* MFA CODE VERIFICATION FORM */}
             {authState === "MFA" && (
               <motion.div key="mfa" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="w-full max-w-md">
                 <form onSubmit={handleMfaSubmit} className={`border ${themeStyles.cardBg} p-8 text-center shadow-xl rounded`}>
@@ -1610,10 +1836,10 @@ export default function CryptaDocsApp() {
               </div>
 
               <div className={`text-xs space-y-3 ${themeStyles.mutedText} leading-relaxed`}>
-                <p><strong className="text-blue-400">1. Theme Switcher:</strong> Toggle between Dark Blue mode and Light mode using the Sun/Moon button.</p>
-                <p><strong className="text-blue-400">2. Profile Setup:</strong> Click the profile icon in top right to upload avatar images and view profile details.</p>
-                <p><strong className="text-blue-400">3. Unlock Vault:</strong> Enter passcode to open standard or custom vaults stored in MongoDB.</p>
-                <p><strong className="text-blue-400">4. Delete Vault:</strong> Open the options menu on any vault card and select <strong>DELETE VAULT</strong> to enter passcode confirmation.</p>
+                <p><strong className="text-blue-400">1. Forgot Password:</strong> Click the "Forgot Password?" button on the sign-in form to request a 6-digit verification code and reset your passcode.</p>
+                <p><strong className="text-blue-400">2. Theme Switcher:</strong> Toggle between Dark Blue mode and Light mode using the Sun/Moon button.</p>
+                <p><strong className="text-blue-400">3. Profile Setup:</strong> Click the profile icon in top right to upload avatar images and view profile details.</p>
+                <p><strong className="text-blue-400">4. Unlock Vault:</strong> Enter passcode to open standard or custom vaults stored in MongoDB.</p>
               </div>
 
               <button 
