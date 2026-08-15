@@ -4,12 +4,18 @@ const UserSchema = new Schema(
   {
     username: { type: String },
     email: { type: String, required: true, unique: true },
+    phone: { type: String },
     mobileNumber: { type: String },
+    dob: { type: String },
     dateOfBirth: { type: String },
+    password: { type: String },
     passwordHash: { type: String, required: true },
     salt: { type: String, required: true },
   },
   { timestamps: true }
 );
 
-export const UserModel = models.User || model("User", UserSchema);
+const User = models.User || model("User", UserSchema);
+
+export default User;
+export { User as UserModel };

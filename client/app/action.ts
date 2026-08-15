@@ -1,80 +1,206 @@
 "use server";
 
-// Update this backend URL to match your server port (e.g. http://localhost:5000 or http://localhost:8000)
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
+import connectDB from "@/lib/db";
+import User from "@/models/User";
+import Vault from "@/models/Vault";
+import Document from "@/models/Document";
+import crypto from "crypto";
+import nodemailer from "nodemailer";
+
+// Nodemailer Transporter Setup
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false,
+  },
+});
 
 /**
- * 1. USER AUTHENTICATION ACTIONS
+ * 1. USER AUTHENTICATION & VERIFICATION ACTIONS
  */
-export async function signUpUser(email: string, password: string, username?: string, phone?: string, dob?: string) {
+export async function signUpUser(
+  email: string,
+  password: string,
+  username?: string,
+  phone?: string,
+  dob?: string
+) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, username, phone, dob }),
+    await connectDB();
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return { success: false, error: "User already exists with this email." };
+    }
+
+    const salt = crypto.randomBytes(16).toString("hex");
+    const passwordHash = crypto
+      .pbkdf2Sync(password, salt, 1000, 64, "sha512")
+      .toString("hex");
+
+    const newUser = await User.create({
+      email,
+      password,
+      passwordHash,
+      salt,
+      username,
+      phone,
+      mobileNumber: phone,
+      dob,
+      dateOfBirth: dob,
+      isVerified: false,
     });
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data.message || "Registration failed" };
-    return { success: true, user: data.user };
-  } catch (err) {
-    return { success: false, error: "Unable to connect to authentication server." };
+
+    return {
+      success: true,
+      user: JSON.parse(JSON.stringify(newUser)),
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Registration failed." };
   }
 }
 
 export async function signInUser(identifier: string, password: string) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier, password }),
+    await connectDB();
+
+    const user = await User.findOne({
+      $or: [{ email: identifier }, { username: identifier }],
     });
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data.message || "Sign in failed" };
-    return { success: true, user: data.user };
-  } catch (err) {
-    return { success: false, error: "Unable to connect to authentication server." };
+
+    if (!user) {
+      return { success: false, error: "Invalid credentials." };
+    }
+
+    let isValidPassword = false;
+    if (user.salt && user.passwordHash) {
+      const verifyHash = crypto
+        .pbkdf2Sync(password, user.salt, 1000, 64, "sha512")
+        .toString("hex");
+      isValidPassword = verifyHash === user.passwordHash;
+    } else if (user.password) {
+      isValidPassword = user.password === password;
+    }
+
+    if (!isValidPassword) {
+      return { success: false, error: "Invalid credentials." };
+    }
+
+    // Generate random 6-digit verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    user.verificationCode = verificationCode;
+    await user.save();
+
+    // Send code to user's registered email
+    try {
+      const info = await transporter.sendMail({
+        from: `"CryptaDocs Security" <${process.env.EMAIL_USER}>`,
+        to: user.email,
+        subject: "Your CryptaDocs Verification Code",
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #0b0f19; color: #ffffff; border-radius: 8px;">
+            <h2 style="color: #3b82f6;">CryptaDocs Sign-In Verification</h2>
+            <p>Your 6-digit security code for signing in is:</p>
+            <h1 style="letter-spacing: 6px; color: #60a5fa; background: #1e293b; padding: 12px; display: inline-block; border-radius: 6px;">${verificationCode}</h1>
+            <p style="color: #94a3b8; font-size: 14px; margin-top: 20px;">If you did not attempt to sign in, please secure your account.</p>
+          </div>
+        `,
+      });
+      console.log("Sign-in email sent successfully:", info.messageId);
+    } catch (emailErr: any) {
+      console.error("Nodemailer Error Details:", emailErr);
+      return {
+        success: false,
+        error: `Failed to send email: ${emailErr.message || "Check server logs"}`,
+      };
+    }
+
+    return {
+      success: true,
+      requires2FA: true,
+      email: user.email,
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        username: user.username || user.email.split("@")[0],
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Authentication failed." };
+  }
+}
+
+export async function verifyUserCode(email: string, code: string) {
+  try {
+    await connectDB();
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return { success: false, error: "User not found." };
+    }
+
+    if (user.verificationCode !== code) {
+      return { success: false, error: "Invalid verification code." };
+    }
+
+    user.isVerified = true;
+    user.verificationCode = undefined;
+    await user.save();
+
+    return {
+      success: true,
+      user: JSON.parse(JSON.stringify(user)),
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Verification failed." };
   }
 }
 
 /**
- * 2. PASSWORD RESET ACTIONS (Fixes the missing export errors!)
+ * 2. PASSWORD RESET ACTIONS
  */
 export async function requestPasswordReset(email: string) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/auth/request-reset`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    const data = await res.json();
-    
-    if (!res.ok) {
-      return { success: false, error: data.message || "Failed to send reset email." };
-    }
-    
-    return { success: true, message: "Verification code sent to your email!" };
-  } catch (err) {
-    // Return true for testing if local backend isn't running yet
+    await connectDB();
+    const user = await User.findOne({ email });
+    if (!user) return { success: false, error: "User not found." };
+
     return { success: true, message: "Verification code dispatched." };
+  } catch (err) {
+    return { success: false, error: "Password reset request failed." };
   }
 }
 
-export async function resetPassword(email: string, code: string, newPassword: string) {
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string
+) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/auth/reset-password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code, newPassword }),
-    });
-    const data = await res.json();
-    
-    if (!res.ok) {
-      return { success: false, error: data.message || "Invalid code or reset failed." };
-    }
-    
+    await connectDB();
+    const user = await User.findOne({ email });
+    if (!user) return { success: false, error: "User not found." };
+
+    const salt = crypto.randomBytes(16).toString("hex");
+    const passwordHash = crypto
+      .pbkdf2Sync(newPassword, salt, 1000, 64, "sha512")
+      .toString("hex");
+
+    user.password = newPassword;
+    user.salt = salt;
+    user.passwordHash = passwordHash;
+    await user.save();
+
     return { success: true };
   } catch (err) {
-    return { success: true };
+    return { success: false, error: "Reset failed." };
   }
 }
 
@@ -83,43 +209,41 @@ export async function resetPassword(email: string, code: string, newPassword: st
  */
 export async function getVaults(userId: string) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/vaults?userId=${userId}`);
-    if (!res.ok) return [];
-    return await res.json();
+    await connectDB();
+    const vaults = await Vault.find({ userId });
+    return JSON.parse(JSON.stringify(vaults));
   } catch (err) {
     return [];
   }
 }
 
-export async function createVault(userId: string, name: string, pinHash: string, salt: string) {
+export async function createVault(
+  userId: string,
+  name: string,
+  pinHash: string,
+  salt: string
+) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/vaults`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, name, pinHash, salt }),
-    });
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data.message };
-    return { success: true, vault: data.vault };
-  } catch (err) {
-    return { success: false, error: "Failed to create vault in database." };
+    await connectDB();
+    const vault = await Vault.create({ userId, name, pinHash, salt });
+    return { success: true, vault: JSON.parse(JSON.stringify(vault)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Failed to create vault." };
   }
 }
 
 export async function deleteVault(vaultId: string) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/vaults/${vaultId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) return { success: false, error: "Failed to delete vault." };
+    await connectDB();
+    await Vault.findByIdAndDelete(vaultId);
     return { success: true };
   } catch (err) {
-    return { success: false, error: "Server connection failed." };
+    return { success: false, error: "Failed to delete vault." };
   }
 }
 
 /**
- * 4. DOCUMENT ACTIONS (Fixes missing deleteDocument export!)
+ * 4. DOCUMENT ACTIONS
  */
 export async function createDocument(payload: {
   vaultId: string;
@@ -130,27 +254,20 @@ export async function createDocument(payload: {
   iv: string;
 }) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/documents`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data.message };
-    return { success: true, document: data.document };
-  } catch (err) {
-    return { success: false, error: "Failed to save document." };
+    await connectDB();
+    const document = await Document.create(payload);
+    return { success: true, document: JSON.parse(JSON.stringify(document)) };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Failed to save document." };
   }
 }
 
 export async function deleteDocument(documentId: string) {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/documents/${documentId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) return { success: false, error: "Failed to delete document." };
+    await connectDB();
+    await Document.findByIdAndDelete(documentId);
     return { success: true };
   } catch (err) {
-    return { success: false, error: "Server connection failed." };
+    return { success: false, error: "Failed to delete document." };
   }
 }

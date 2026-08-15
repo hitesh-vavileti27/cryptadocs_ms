@@ -171,7 +171,7 @@ export default function CryptaDocsApp() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  // MongoDB & Auth status states
+  // Database & Auth states
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
@@ -190,7 +190,7 @@ export default function CryptaDocsApp() {
     avatarUrl: "",
   });
 
-  // Login & Registration state
+  // Authentication credentials
   const [loginIdentifier, setLoginIdentifier] = useState("agent@cryptadocs.local");
   const [loginPassword, setLoginPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
@@ -311,7 +311,7 @@ export default function CryptaDocsApp() {
         addLog("VAULT", `Synchronized ${dbVaults.length} vaults from database.`);
       }
     } catch (err) {
-      console.error("Error loading vaults from MongoDB:", err);
+      console.error("Error loading vaults from Database:", err);
     }
   };
 
@@ -345,7 +345,7 @@ export default function CryptaDocsApp() {
           email: res.user.email,
           username: res.user.username || res.user.email.split("@")[0],
         }));
-        addLog("AUTH", `Credentials verified in database for: ${res.user.email}`);
+        addLog("AUTH", `Credentials verified for: ${res.user.email}`);
         setAuthState("MFA");
       } else {
         setAuthError(res.error || "Invalid email or password.");
@@ -437,7 +437,7 @@ export default function CryptaDocsApp() {
         };
         setUser(newUser);
         setUserId(res.user.id);
-        addLog("AUTH", `Account created in database for: ${regEmail}`);
+        addLog("AUTH", `Account created for: ${regEmail}`);
         setIsRegistering(false);
         setLoginIdentifier(regEmail);
         setRegPassword("");
@@ -509,7 +509,7 @@ export default function CryptaDocsApp() {
     try {
       const res = await createVaultAction(userId, newVaultName, newVaultPin, "salt_123");
       if (res.success && res.vault) {
-        addLog("VAULT", `Created vault "${newVaultName}" in database.`);
+        addLog("VAULT", `Created vault "${newVaultName}".`);
         await refreshVaultsFromDb(userId);
       } else {
         addLog("VAULT", `Vault creation failed: ${res.error}`);
@@ -547,7 +547,7 @@ export default function CryptaDocsApp() {
       try {
         const res = await deleteVaultAction(vaultToDelete.id);
         if (res.success) {
-          addLog("VAULT", `Deleted vault "${vaultToDelete.name}" from database.`);
+          addLog("VAULT", `Deleted vault "${vaultToDelete.name}".`);
           if (userId) await refreshVaultsFromDb(userId);
         }
       } catch (err) {
@@ -572,7 +572,7 @@ export default function CryptaDocsApp() {
         await deleteDocumentAction(fileId);
       }
       setDocuments((prev) => prev.filter((doc) => doc.id !== fileId));
-      addLog("VAULT", `Deleted file '${fileName}' from database.`);
+      addLog("VAULT", `Deleted file '${fileName}'.`);
       if (activeDoc?.id === fileId) {
         setActiveDoc(null);
       }
@@ -1711,7 +1711,7 @@ export default function CryptaDocsApp() {
                   }`}
                 >
                   <Upload size={32} className="mx-auto mb-2 text-blue-500 animate-pulse" />
-                  <p className="text-xs font-bold">Click to choose or drop real file here</p>
+                  <p className="text-xs font-bold">Click to choose or drop file here</p>
                   <p className={`text-[10px] ${themeStyles.mutedText} mt-1`}>Supports Images (PNG, JPG, WEBP), PDF, and Text</p>
                 </div>
 
@@ -1836,10 +1836,10 @@ export default function CryptaDocsApp() {
               </div>
 
               <div className={`text-xs space-y-3 ${themeStyles.mutedText} leading-relaxed`}>
-                <p><strong className="text-blue-400">1. Forgot Password:</strong> Click the "Forgot Password?" button on the sign-in form to request a 6-digit verification code and reset your passcode.</p>
-                <p><strong className="text-blue-400">2. Theme Switcher:</strong> Toggle between Dark Blue mode and Light mode using the Sun/Moon button.</p>
+                <p><strong className="text-blue-400">1. Forgot Password:</strong> Click the "Forgot Password?" button on the sign-in form to request a verification code and reset your passcode.</p>
+                <p><strong className="text-blue-400">2. Theme Switcher:</strong> Toggle between Dark Mode and Light Mode using the Sun/Moon button.</p>
                 <p><strong className="text-blue-400">3. Profile Setup:</strong> Click the profile icon in top right to upload avatar images and view profile details.</p>
-                <p><strong className="text-blue-400">4. Unlock Vault:</strong> Enter passcode to open standard or custom vaults stored in MongoDB.</p>
+                <p><strong className="text-blue-400">4. Unlock Vault:</strong> Enter passcode to open standard or custom vaults stored in the database.</p>
               </div>
 
               <button 
@@ -1887,7 +1887,7 @@ export default function CryptaDocsApp() {
 
       {/* FOOTER */}
       <footer className={`relative z-10 border-t px-6 py-2 text-[10px] flex justify-between items-center transition-colors duration-300 ${isDark ? "bg-[#060c1a]/90 border-white/10 text-blue-200/60" : "bg-white/90 border-slate-200 text-slate-500"}`}>
-        <div>CONNECTED TO SECURE MONGODB SERVER</div>
+        <div>CONNECTED TO SECURE SERVER</div>
         <div>ENCRYPTION ACTIVE</div>
       </footer>
 
