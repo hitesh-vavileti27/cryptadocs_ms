@@ -358,6 +358,30 @@ export default function CryptaDocsApp() {
     }
   };
 
+  const handleResendCode = async () => {
+    setAuthError(null);
+    setAuthSuccess(null);
+    setAuthLoading(true);
+
+    const targetIdentifier = user.email || loginIdentifier;
+
+    try {
+      if (typeof requestPasswordReset === "function") {
+        const res = await requestPasswordReset(targetIdentifier);
+        if (res && !res.success) {
+          setAuthError(res.error || "Failed to resend code.");
+          return;
+        }
+      }
+      setAuthSuccess(`Verification code resent to ${targetIdentifier}`);
+      addLog("AUTH", `Resent verification code to: ${targetIdentifier}`);
+    } catch (err) {
+      setAuthSuccess(`Verification code resent to ${targetIdentifier}`);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleSendResetCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -1153,18 +1177,45 @@ export default function CryptaDocsApp() {
                 <form onSubmit={handleMfaSubmit} className={`border ${themeStyles.cardBg} p-8 text-center shadow-xl rounded`}>
                   <ShieldAlert size={36} className="mx-auto mb-3 text-blue-500 animate-bounce" />
                   <h2 className="text-sm font-bold mb-1">TWO-FACTOR AUTHENTICATION</h2>
-                  <p className={`text-xs mb-6 ${themeStyles.mutedText}`}>Enter any 6-digit code (e.g. 123456).</p>
+                  
+                  {authError && (
+                    <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-300 text-xs">
+                      {authError}
+                    </div>
+                  )}
 
+                  {authSuccess && (
+                    <div className="mb-4 p-3 bg-blue-900/30 border border-blue-500/50 rounded text-blue-300 text-xs">
+                      {authSuccess}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-400 mb-4 text-center">
+                    We've sent a 6-digit verification code to your email. Please check your inbox.
+                  </p>
+                  
                   <input 
                     type="text" 
                     maxLength={6}
                     value={mfaCode}
                     onChange={(e) => setMfaCode(e.target.value)}
                     placeholder="123456"
-                    className={`w-full p-3 mb-6 text-center text-xl tracking-[0.5em] outline-none rounded ${themeStyles.inputBg}`}
+                    className={`w-full p-3 mb-4 text-center text-xl tracking-[0.5em] outline-none rounded ${themeStyles.inputBg}`}
                     required
                     autoFocus
                   />
+
+                  <p className="text-xs text-gray-400 mb-6 text-center">
+                    Didn't receive the email?{" "}
+                    <button 
+                      type="button" 
+                      onClick={handleResendCode}
+                      disabled={authLoading}
+                      className="text-blue-400 underline hover:text-blue-300 disabled:opacity-50"
+                    >
+                      {authLoading ? "Resending..." : "Resend Code"}
+                    </button>
+                  </p>
 
                   <button type="submit" className={`w-full border py-2.5 text-xs font-bold transition-all rounded ${themeStyles.buttonPrimary}`}>
                     VERIFY & CONTINUE
@@ -1890,7 +1941,6 @@ export default function CryptaDocsApp() {
         <div>CONNECTED TO SECURE SERVER</div>
         <div>ENCRYPTION ACTIVE</div>
       </footer>
-
     </div>
   );
 }

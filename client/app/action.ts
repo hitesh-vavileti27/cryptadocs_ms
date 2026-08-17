@@ -2,8 +2,8 @@
 
 import connectDB from "@/lib/db";
 import User from "@/models/User";
-import Vault from "@/models/Vault";
-import Document from "@/models/Document";
+import { VaultModel } from "@/models/Vault";
+import { DocumentModel } from "@/models/Document";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 
@@ -92,13 +92,11 @@ export async function signInUser(identifier: string, password: string) {
       return { success: false, error: "Invalid credentials." };
     }
 
-    // Generate random 6-digit verification code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
 
     user.verificationCode = verificationCode;
     await user.save();
 
-    // Send code to user's registered email
     try {
       const info = await transporter.sendMail({
         from: `"CryptaDocs Security" <${process.env.EMAIL_USER}>`,
@@ -210,7 +208,7 @@ export async function resetPassword(
 export async function getVaults(userId: string) {
   try {
     await connectDB();
-    const vaults = await Vault.find({ userId });
+    const vaults = await VaultModel.find({ userId });
     return JSON.parse(JSON.stringify(vaults));
   } catch (err) {
     return [];
@@ -221,11 +219,11 @@ export async function createVault(
   userId: string,
   name: string,
   pinHash: string,
-  salt: string
+  pinSalt: string
 ) {
   try {
     await connectDB();
-    const vault = await Vault.create({ userId, name, pinHash, salt });
+    const vault = await VaultModel.create({ userId, name, pinHash, pinSalt });
     return { success: true, vault: JSON.parse(JSON.stringify(vault)) };
   } catch (err: any) {
     return { success: false, error: err.message || "Failed to create vault." };
@@ -235,7 +233,7 @@ export async function createVault(
 export async function deleteVault(vaultId: string) {
   try {
     await connectDB();
-    await Vault.findByIdAndDelete(vaultId);
+    await VaultModel.findByIdAndDelete(vaultId);
     return { success: true };
   } catch (err) {
     return { success: false, error: "Failed to delete vault." };
@@ -245,17 +243,28 @@ export async function deleteVault(vaultId: string) {
 /**
  * 4. DOCUMENT ACTIONS
  */
+export async function getDocumentsByVaultId(vaultId: string) {
+  try {
+    await connectDB();
+    const documents = await DocumentModel.find({ vaultId });
+    return JSON.parse(JSON.stringify(documents));
+  } catch (err) {
+    return [];
+  }
+}
+
 export async function createDocument(payload: {
   vaultId: string;
   title: string;
   encryptedContent: string;
   contentHash: string;
   fileSize: string;
+  mimeType?: string;
   iv: string;
 }) {
   try {
     await connectDB();
-    const document = await Document.create(payload);
+    const document = await DocumentModel.create(payload);
     return { success: true, document: JSON.parse(JSON.stringify(document)) };
   } catch (err: any) {
     return { success: false, error: err.message || "Failed to save document." };
@@ -265,7 +274,7 @@ export async function createDocument(payload: {
 export async function deleteDocument(documentId: string) {
   try {
     await connectDB();
-    await Document.findByIdAndDelete(documentId);
+    await DocumentModel.findByIdAndDelete(documentId);
     return { success: true };
   } catch (err) {
     return { success: false, error: "Failed to delete document." };
